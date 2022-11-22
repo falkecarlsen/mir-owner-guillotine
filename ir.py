@@ -1,9 +1,23 @@
 from pprint import pprint
+from typing import Optional, Any, List, Set
 
 import numpy as np
-import sympy as sp
 
 DEBUG = True
+
+
+class Statement:
+    """
+    Statement occurring in MIR with concomitant data relevant for building CFG+BB IR
+    """
+
+    def __init__(self, lhs_location=None, rhs_location=None, rhs_value=None, rhs_type=None, op=None, bb_id=None):
+        self.lhs_location: int = None
+        self.rhs_location: Optional[int] = None
+        self.rhs_value: Optional[Any] = None
+        self.rhs_type: Optional[str] = None
+        self.rhs_op: Optional[str] = None
+        self.mutability: Optional[bool] = None
 
 
 class FlagMatrix:
@@ -11,6 +25,7 @@ class FlagMatrix:
     FlagMatrix describing the borrowing status of locations
     Transposed wrt. the paper to make it easier to work with
     """
+
     # symbols
     symbols = {'i': 2, 'm': 1, '0': 0}
 
@@ -45,9 +60,9 @@ class FlagMatrix:
 class BasicBlock:
     def __init__(self, id: int):
         self.name: int = id
-        self.instr = []
-        self.succ = []
-        self.pred = []
+        self.stmts: List[Statement] = []
+        self.succ: Set[BasicBlock] = []
+        self.pred: Set[BasicBlock] = []
         self.livein = []
         self.liveout = []
         self.defs = []
@@ -57,6 +72,9 @@ class BasicBlock:
         # check if id is positive and reject if not
         if id < 0:
             raise ValueError(f"Invalid BB id: {id}")
+
+    def add_def(self, loc):
+        self.defs.append(loc)
 
     def __str__(self):
         return self.name
@@ -85,31 +103,88 @@ class CFG:
     Control flow graph data structure using BasicBlock as nodes, and edges by pred and succ on BasicBlock/linkedlist
     """
 
+    # list of BB nodes
+    bb = []
+    # list of locations in the CFG
+    locations = []
+    # list of types of locations in the CFG k:v -> location:type
+    types = {}
+
     def __init__(self):
-        # list of BB nodes
-        self.nodes = []
-        # list of locations in the CFG
-        self.locations = []
-        # list of types of locations in the CFG k:v -> location:type
-        self.types = {}
+        pass
 
     def index_of(self, node: BasicBlock):
-        return self.nodes.index(node)
+        return self.bb.index(node)
 
-    def add_node(self, node: BasicBlock):
-        self.nodes.append(node)
+    def add_bb(self, node: BasicBlock):
+        self.bb.append(node)
 
     def add_edge(self, fro: BasicBlock, to: BasicBlock):
         # set succ of fro to to
-        self.nodes[self.index_of(fro)].succ.append(self.index_of(to))
+        self.bb[self.index_of(fro)].succ.append(self.index_of(to))
         # set pred of to to fro
-        self.nodes[self.index_of(to)].pred.append(self.index_of(fro))
+        self.bb[self.index_of(to)].pred.append(self.index_of(fro))
 
     def pprint(self):
-        for n in self.nodes:
+        for n in self.bb:
             print(f"BB {n.name}:")
             print(f"  succ: {n.succ}")
             print(f"  pred: {n.pred}")
+
+
+class CFGUDChain(CFG):
+    """
+    CFG data structure with Use-Define chain computation
+    """
+
+    # list of UD chains
+    ud_chains = []
+
+    def __init__(self):
+        super().__init__()
+
+    def compute_ud_chains(self):
+        # compute UD chains
+        for n in self.bb:
+            # compute defs
+            n.defs = [i for i in n.instr if i[0] == 'def']
+            # compute uses
+            n.uses = [i for i in n.instr if i[0] == 'use']
+            # compute gen
+            n.gen = [i for i in n.instr if i[0] == 'gen']
+            # compute livein
+            n.livein = [i for i in n.instr if i[0] == 'livein']
+            # compute liveout
+            n.liveout = [i for i in n.instr if i[0] == 'liveout']
+
+        # compute UD chains
+        for n in self.bb:
+            for u in n.uses:
+                # find def
+                for d in n.defs:
+                    if u[1] == d[1]:
+                        self.ud_chains.append((u, d))
+                        break
+                # find gen
+                for g in n.gen:
+                    if u[1] == g[1]:
+                        self.ud_chains.append((u, g))
+                        break
+                # find livein
+                for l in n.livein:
+                    if u[1] == l[1]:
+                        self.ud_chains.append((u, l))
+                        break
+                # find liveout
+                for l in n.liveout:
+                    if u[1] == l[1]:
+                        self.ud_chains.append((u, l))
+                        break
+
+    def pprint(self):
+        super().pprint()
+        for c in self.ud_chains:
+            print(f"UD chain: {c}")
 
 
 if __name__ == '__main__':
