@@ -1,5 +1,6 @@
 import re
 from pprint import pprint
+from typing import List
 
 from sly import Lexer, Parser
 
@@ -26,12 +27,13 @@ Rust MIR simplified grammar for borrow-checking and CFG generation
 
 cfg = ir.CFG()
 curr_bb_id = -1
+temp_stmts: List[ir.Statement] = []
 
 
 # noinspection PyUnresolvedReferences,PyUnboundLocalVariable
 class MirLexer(Lexer):
     # Tokens
-    literals = {'+', '-', '*', '/', '(', ')', '=', ':', ';', ',', '[', ']', '{', '}', '_'}
+    literals = {'+', '-', '*', '/', '(', ')', '=', ':', ';', ',', '[', ']', '{', '}', '_', '<', '>'}
     tokens = {
         LOCATION,
         FN,
@@ -40,7 +42,6 @@ class MirLexer(Lexer):
         LETMUT,
         REF,
         REFMUT,
-        TYPE,
         BB,
         PARAMS,
         EXPR,
@@ -54,6 +55,9 @@ class MirLexer(Lexer):
         STATEMENT,
         NUMBER,
         UNREACHABLE,
+        GOTO,
+        ARROW,
+        COLONTWICE,
     }
     ignore = ' \t'
     # ignore // comments
@@ -64,20 +68,23 @@ class MirLexer(Lexer):
     FN = r'fn'
     LET = r'let'
     LETMUT = r'letmut'
-
     BB = r'bb\d+'
 
-    TYPE = r'[a-zA-Z_][a-zA-Z0-9_] | \(\)*'
+    # TYPE = r'[a-zA-Z_][a-zA-Z0-9_] | \(\)*'
     PARAMS = r'\((\s*[a-zA-Z_][a-zA-Z0-9_]*\s*,)*\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\)'
     EXPR = r'\((\s*[a-zA-Z_][a-zA-Z0-9_]*\s*,)*\s*[a-zA-Z_][a-zA-Z0-=9_]*\s*\)'
 
-    # statements; assignment, borrow, mutborrow, return, call
+    ARROW = r'->'
+    GOTO = r'goto'
+    COLONTWICE = r'::'
     REFMUT = r'&mut'
     REF = r'&'
     DEREF = r'\*'
-    # TYPES = [r'i32', r'u32', r'i64', r'u64', r'f32', r'f64', r'bool', r'char', r'str', r'String', r'()']
-    TYPES = r'i32'
-    FUNCTIONS = ["HashMap", "get"]
+    TYPES = r'|'.join(
+        [r'i32', r'u32', r'i64', r'u64', r'f32', r'f64', r'bool', r'char', r'str', r'String', r'\(\)', r'HashMap',
+         r'Index'])
+    # TYPES = r'i32'
+    FUNCTIONS = r'|'.join(["index", "insert", "from", "get"])
     CONSTANTS = r'const'
     MOVE = r'move'
     RETURN = r'return'
@@ -125,12 +132,12 @@ class MirParser(Parser):
         print('function', p.NAME, p.params, p.blocks)
 
     # MIR type definitions
-    @_('LET LOCATION ":" TYPE ";"')
+    @_('LET LOCATION ":" TYPES ";"')
     def location_type_immut(self, p):
         self.types[p.LOCATION] = p.TYPE
         return p.LOCATION
 
-    @_('LETMUT LOCATION ":" TYPE ";"')
+    @_('LETMUT LOCATION ":" TYPES ";"')
     def location_type_mut(self, p):
         self.types[p.LOCATION] = p.TYPE
         return p.LOCATION
@@ -142,7 +149,9 @@ class MirParser(Parser):
         try:
             curr_bb_id = int(p.BB[-1])
             # create BasicBlock and add to CFG
-            bb = data.BasicBlock(curr_bb_id)
+            bb = ir.BasicBlock(curr_bb_id)
+            # add temp statements to BasicBlock
+            bb.add_statements(temp_stmts)
             cfg.add_bb(bb)
 
         except ValueError:
@@ -150,7 +159,9 @@ class MirParser(Parser):
             exit(1)
 
         print(f'block{curr_bb_id} end')
-        return p.stmtlist
+        print(f"flushing {len(temp_stmts)} temp_stmts")
+        temp_stmts.clear()
+        return cfg
 
     @_('')
     def block_start(self, _p):
@@ -165,7 +176,7 @@ class MirParser(Parser):
     def bblist(self, _p):
         return []
 
-    # stmtlist
+    # stmtlist -> stmtlist statement | statement
     @_('stmtlist statement')
     def stmtlist(self, p):
         # do something with p.statement
@@ -177,18 +188,46 @@ class MirParser(Parser):
         print('stmtlist', p.statement)
         return [p.statement]
 
-    # multiple statements
-    @_('statement ";" statement')
-    def statements(self, p):
-        # NOP, do rules:
-        # stmts -> stmt | stmts stmt
-        print('multiple statements', p.statement0, p.statement1)
-        return p.statement0, p.statement1
+    # assigment -> LOCATION = assigntype ;
+    # assigntype -> LOCATION | constant | borrow | function
+    # function -> TurboFish fun_goto | TurboFish
+    # fun_goto -> ARROW fun_goto_location
+    # fun_goto_location -> LOCATION | "[" cond_goto_loc "]"
+    # cond_goto_loc -> cond_goto_loc "," cond_goto_loc | cond_goto_loc
+    #                | NUMBER "_" types ":" LOCATION | OTHERWISE ":" LOCATION
 
-    @_('statement ";"')
-    def statements(self, p):
-        print('single statement', p.statement)
-        return p.statement
+    # types -> TYPE
+    # constant -> CONSTANT NUMBER _ TYPE
+    # borrow -> REF SOURCE | REFMUT SOURCE
+    # source -> LOCATION | ( source )
+    # source -> LOCATION | DEREF LOCATION
+
+    # <GenericType<u32, String>>::index(move _1, move _2) #-> bb42;
+    # HashMap::<u32, String>::get::<u32>(move _1, move _2)#-> bb42;
+    # std::string::String
+    # &std::string::String
+    # &std::collections::HashMap<u32, std::string::String>
+
+    # TurboFish -> GenericType :: Function
+    # GenericType -> < GenericType Types > | Types
+    # ConvertedType -> GenericType "as" GenericType
+    # Types -> Type | ConvertedType
+    # Function -> FUNCTIONS "(" PARAMS ")"
+    # PARAMS -> PARAMS "," PARAM | PARAM
+    # PARAM -> LOCATION | MODE LOCATION
+    # MODE -> move
+
+    # goto -> GOTO ARROW LOCATION ;
+
+
+
+
+    #####
+    # types
+    @_('TYPES')
+    def types(self, p):
+        return p.types
+
 
     # assignment of location to location
     @_('LOCATION "=" LOCATION ";"')
@@ -204,6 +243,16 @@ class MirParser(Parser):
     def statement(self, p):
         print('const statement', p.LOCATION, p.NUMBER, p.TYPES)
         location_id = int(p.LOCATION[1:])
+        # create Statement
+        stmt = ir.Statement(
+            lhs_location=location_id,
+            value_type=ir.ValueType.CONST,
+            rhs_value=p.NUMBER,
+            stmt_type=ir.StatementType.ASSIGN,
+        )
+        # add to temp stmts
+        temp_stmts.append(stmt)
+
         self.locations[location_id] = p.NUMBER
         # maybe do check if fn-defined type corresponds with currently seen type
         self.types[location_id] = p.TYPES
@@ -216,10 +265,17 @@ class MirParser(Parser):
         borrowee_id = int(p.LOCATION1[1:])
         print('mut borrow statement', borrower_id, borrowee_id)
 
-        self.types[borrower_id] = "&mut_" + str(self.types[borrowee_id])
-        self.locations[borrower_id] = self.locations[borrowee_id]
-        # do cfg borrow mut location
-        return borrower_id, borrowee_id
+        # create Statement
+        stmt = ir.Statement(
+            lhs_location=borrower_id,
+            value_type=ir.ValueType.BORROW,
+            rhs_value=borrowee_id,
+            stmt_type=ir.StatementType.ASSIGN,
+        )
+        # add to temp stmts
+        temp_stmts.append(stmt)
+
+        # return borrower_id, borrowee_id
 
     # deref location statement
     @_('DEREF LOCATION')
@@ -229,31 +285,64 @@ class MirParser(Parser):
 
         return p.LOCATION
 
-    """
-    # parens location statement
-    @_('"(" LOCATION ")"')
-    def statement(self, p):
-        print('parens statement', p.LOCATION)
-        return p.LOCATION
-    """
-
     @_('RETURN ";"')
     def statement(self, p):
         print('statement return')
-        # close block scope?
+        # add statement to temp stmts
+        temp_stmts.append(ir.Statement(
+            stmt_type=ir.StatementType.RETURN,
+        ))
+
+        # todo: close off current bb, or handled by block end action code?
 
     # unreachable statement
     @_('UNREACHABLE ";"')
     def statement(self, p):
         print('statement unreachable')
-        # do cfg unreachable
+        temp_stmts.append(ir.Statement(
+            stmt_type=ir.StatementType.UNREACHABLE,
+        ))
 
-    # types
-    @_('TYPES')
+
+    # todo GOTO EBNF:
+
+    # goto statment
+    @_('GOTO LOCATION ";"')
+    def goto(self, p):
+        print('goto statement', p.LOCATION)
+        # add statement to temp stmts
+        temp_stmts.append(ir.Statement(
+            stmt_type=ir.StatementType.GOTO,
+            rhs_value=p.LOCATION,
+        ))
+        return p.LOCATION
+
+    # <GenericType<u32, String>>::index(move _1, move _2) #-> bb42;
+    # HashMap::<u32, String>::get::<u32>(move _1, move _2)#-> bb42;
+    # std::string::String
+    # &std::string::String
+    # &std::collections::HashMap<u32, std::string::String>
+
+    # TurboFish -> GenericType :: Function
+    # GenericType -> < GenericType Types > | Types
+    # ConvertedType -> GenericType "as" GenericType
+    # Types -> Type | ConvertedType
+    # Function -> FUNCTIONS "(" PARAMS ")"
+    # PARAMS -> PARAMS "," PARAM | PARAM
+    # PARAM -> LOCATION | MODE LOCATION
+    # MODE -> move
+    """
+    # function call
+    @_('LOCATION "=" types COLONTWICE FUNCTIONS "(" PARAMS ")" GOTO_FUNCTION ";"')
+    def statement(self, p):
+        print('function call statement', p.LOCATION, p.types, p.FUNCTIONS, p.PARAMS, p.GOTO)
+        return p.types, p.FUNCTIONS, p.PARAMS
+
+
+    @_('TYPES "<" types ">"')
     def types(self, p):
-        print("type: ", p.TYPES)
-        return p.TYPES
-
+        return p.types
+    """
 
 def parse(mir_program):
     mir_lexer = MirLexer()
@@ -264,25 +353,25 @@ def parse(mir_program):
 if __name__ == '__main__':
     bold = '\033[1m'
     unbold = '\033[0m'
+    header = "=" * 80
 
-    lexer = MirLexer()
-    parser = MirParser()
     text = open('mir-input-grammar/pass/test.mir', 'r').read()
 
-    for tok in lexer.tokenize(text):
+    print(f"{header}\nlexing: ")
+    mir_lexer = MirLexer()
+    for tok in mir_lexer.tokenize(text=text):
         print(
-            f"type= {bold}{tok.type:<10s}{unbold} value= {bold}{tok.value:<10}{unbold} lineno={tok.lineno:<10} index={tok.index:<10} end={tok.end:<10}"
+            f"type= {bold}{tok.type:<11s}{unbold} "
+            f"value= {bold}{tok.value:<11}{unbold} "
+            f"lineno={tok.lineno:<10} "
+            f"index={tok.index:<10} "
+            f"end={tok.end:<10}"
         )
-    print("=" * 50)
 
-    res = parser.parse(lexer.tokenize(text))
-    print("result: ")
-    pprint(res)
-    print("=" * 50)
+    print(f"{header}\nparsing: ")
+    res = parse(text)
+    print(f"{header}\nparsing result: ")
+    # lpprint(res)
 
-    print(f"locations: {parser.locations}")
-    print(f"types: {parser.types}")
-    print(f"names: {parser.names}")
-
-    print("=" * 50)
+    print(f"{header}\ncfg pprint: ")
     cfg.pprint()

@@ -1,23 +1,11 @@
+from dataclasses import dataclass, field
+from enum import Enum, auto
 from pprint import pprint
-from typing import Optional, Any, List, Set
+from typing import Optional, Any, List, Set, Dict
 
 import numpy as np
 
 DEBUG = True
-
-
-class Statement:
-    """
-    Statement occurring in MIR with concomitant data relevant for building CFG+BB IR
-    """
-
-    def __init__(self, lhs_location=None, rhs_location=None, rhs_value=None, rhs_type=None, op=None, bb_id=None):
-        self.lhs_location: int = None
-        self.rhs_location: Optional[int] = None
-        self.rhs_value: Optional[Any] = None
-        self.rhs_type: Optional[str] = None
-        self.rhs_op: Optional[str] = None
-        self.mutability: Optional[bool] = None
 
 
 class FlagMatrix:
@@ -57,45 +45,83 @@ class FlagMatrix:
             print([list(self.symbols.keys())[list(self.symbols.values()).index(i)] for i in c])
 
 
-class BasicBlock:
-    def __init__(self, id: int):
-        self.name: int = id
-        self.stmts: List[Statement] = []
-        self.succ: Set[BasicBlock] = []
-        self.pred: Set[BasicBlock] = []
-        self.livein = []
-        self.liveout = []
-        self.defs = []
-        self.uses = []
-        self.gen = []
+class StatementType(Enum):
+    """
+    Statement type
+    """
 
-        # check if id is positive and reject if not
-        if id < 0:
-            raise ValueError(f"Invalid BB id: {id}")
+    ASSIGN = auto()
+    UNREACHABLE = auto()
+    RETURN = auto()
+    GOTO = auto()
 
-    def add_def(self, loc):
-        self.defs.append(loc)
 
-    def __str__(self):
-        return self.name
+
+class ValueType(Enum):
+    """
+    Value type
+    """
+
+    CONST = auto()
+    LOCATION = auto()
+    BORROW = auto()
+    DEREF = auto()
+    CALL = auto()
+
+
+@dataclass
+class Statement:
+    """
+    Statement occurring in MIR with concomitant data relevant for building CFG+BB IR
+    """
+    stmt_type: Optional[StatementType] = None
+    lhs_location: int = None
+    mutability: Optional[bool] = None
+    value_type: Optional[ValueType] = None
+    rhs_location: Optional[int] = None
+    rhs_op: Optional[str] = None
+    rhs_value: Optional[Any] = None
 
     def __repr__(self):
-        return self.name
+        return f"\tStatement(\n" \
+               f"\t\tstmt_type={self.stmt_type},\n" \
+               f"\t\tlhs_location={self.lhs_location}, \n" \
+               f"\t\trhs_location={self.rhs_location}, \n" \
+               f"\t\trhs_value={self.rhs_value}, \n" \
+               f"\t\trhs_type={self.value_type}, \n" \
+               f"\t\trhs_op={self.rhs_op}, \n" \
+               f"\t\tmutability={self.mutability})\n"
 
-    def __eq__(self, other):
-        return self.name == other.name
 
-    def __hash__(self):
-        return hash(self.name)
+@dataclass
+class BasicBlock:
+    name: int
+    stmts: List[Statement] = field(default_factory=list)
+    succ: Set['BasicBlock'] = field(default_factory=set)
+    pred: Set['BasicBlock'] = field(default_factory=set)
+    livein: Set = field(default_factory=set)
+    liveout: Set = field(default_factory=set)
+    defs: List = field(default_factory=list)
+    uses: List = field(default_factory=list)
+    gen: List = field(default_factory=list)
+    kill: List = field(default_factory=list)
 
-    def __lt__(self, other):
-        return self.name < other.name
+    def __repr__(self):
+        return (
+            f"\tBasicBlock(id={self.name}, \n"
+            f"\tstmts=\n{self.stmts}, \n"
+            f"\tsucc={self.succ}, \n"
+            f"\tpred={self.pred}, \n"
+            f"\tlivein={self.livein}, \n"
+            f"\tliveout={self.liveout}, \n"
+            f"\tdefs={self.defs}, \n"
+            f"\tuses={self.uses}, \n"
+            f"\tgen={self.gen}, \n"
+            f"\tkill={self.kill})\n"
+        )
 
-    def __gt__(self, other):
-        return not self.__lt__(other) and not self.__eq__(other)
-
-    def __le__(self, other):
-        return self.__lt__(other) or self.__eq__(other)
+    def add_statements(self, stmts: List[Statement]):
+        self.stmts.extend(stmts)
 
 
 class CFG:
@@ -104,29 +130,39 @@ class CFG:
     """
 
     # list of BB nodes
-    bb = []
+    bbs: List[BasicBlock] = []
     # list of locations in the CFG
     locations = []
     # list of types of locations in the CFG k:v -> location:type
-    types = {}
+    types: Dict[int, str] = {}
 
     def __init__(self):
-        pass
+        self.bbs = []
+        self.locations = []
+        self.types = {}
+
+    def __repr__(self):
+        return f"CFG(bbs={self.bbs},\n locations={self.locations},\n types={self.types})"
 
     def index_of(self, node: BasicBlock):
-        return self.bb.index(node)
+        return self.bbs.index(node)
+
+    def add_stmt_bb(self, bb_id: int, stmt: Statement):
+        self.bbs[bb_id].stmts.append(stmt)
 
     def add_bb(self, node: BasicBlock):
-        self.bb.append(node)
+        self.bbs.append(node)
+        # sort bbs by name (int)
+        self.bbs.sort(key=lambda x: x.name)
 
     def add_edge(self, fro: BasicBlock, to: BasicBlock):
         # set succ of fro to to
-        self.bb[self.index_of(fro)].succ.append(self.index_of(to))
+        self.bbs[self.index_of(fro)].succ.append(self.index_of(to))
         # set pred of to to fro
-        self.bb[self.index_of(to)].pred.append(self.index_of(fro))
+        self.bbs[self.index_of(to)].pred.append(self.index_of(fro))
 
     def pprint(self):
-        for n in self.bb:
+        for n in self.bbs:
             print(f"BB {n.name}:")
             print(f"  succ: {n.succ}")
             print(f"  pred: {n.pred}")
