@@ -1,11 +1,10 @@
 bb0: {
-    //_1 = const 10_i32;               // scope 0 at src/main.rs:2:22: 2:24
-    //_2 = &mut (*_1);               // scope 0 at src/main.rs:2:22: 2:24
+    _1 = const 10_i32;               // scope 0 at src/main.rs:2:22: 2:24
+    //_3 = &mut (*_1);               // scope 0 at src/main.rs:2:22: 2:24
     _3 = <HashMap<u32, String> as Index<&u32>>::index(move _19, move _20) -> bb9
-    _3 = const 30_i32;               // scope 0 at src/main.rs:2:22: 2:24
     //_4 = _3;
     //_2 = &(*_1);
     //_3 = HashMap::<u32, String>::get::<u32>(move _3, move _5) -> bb1;
-    unreachable;                     // scope 0 at src/main.rs:2:22: 2:24
-    return;                          // scope 0 at src/main.rs:2:2: 2:2
+    //unreachable;                     // scope 0 at src/main.rs:2:22: 2:24
+    //return;                          // scope 0 at src/main.rs:2:2: 2:2
 }

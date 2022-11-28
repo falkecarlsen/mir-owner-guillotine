@@ -56,7 +56,6 @@ class StatementType(Enum):
     GOTO = auto()
 
 
-
 class ValueType(Enum):
     """
     Value type
@@ -74,23 +73,28 @@ class Statement:
     """
     Statement occurring in MIR with concomitant data relevant for building CFG+BB IR
     """
+
     stmt_type: Optional[StatementType] = None
     lhs_location: int = None
-    mutability: Optional[bool] = None
+    mutability: Optional[bool] = False
     value_type: Optional[ValueType] = None
     rhs_location: Optional[int] = None
     rhs_op: Optional[str] = None
     rhs_value: Optional[Any] = None
+    bb_target: Optional[int] = None
 
     def __repr__(self):
-        return f"\tStatement(\n" \
-               f"\t\tstmt_type={self.stmt_type},\n" \
-               f"\t\tlhs_location={self.lhs_location}, \n" \
-               f"\t\trhs_location={self.rhs_location}, \n" \
-               f"\t\trhs_value={self.rhs_value}, \n" \
-               f"\t\trhs_type={self.value_type}, \n" \
-               f"\t\trhs_op={self.rhs_op}, \n" \
-               f"\t\tmutability={self.mutability})\n"
+        return (
+            f"\tStatement(\n"
+            f"\t\tstmt_type={self.stmt_type},\n"
+            f"\t\tlhs_location={self.lhs_location}, \n"
+            f"\t\trhs_location={self.rhs_location}, \n"
+            f"\t\trhs_value={self.rhs_value}, \n"
+            f"\t\trhs_type={self.value_type}, \n"
+            f"\t\trhs_op={self.rhs_op}, \n"
+            f"\t\tmutability={self.mutability})\n"
+            f"\t\tbb_target={self.bb_target})\n"
+        )
 
 
 @dataclass
@@ -164,8 +168,7 @@ class CFG:
     def pprint(self):
         for n in self.bbs:
             print(f"BB {n.name}:")
-            print(f"  succ: {n.succ}")
-            print(f"  pred: {n.pred}")
+            [print(s) for s in n.stmts]
 
 
 class CFGUDChain(CFG):

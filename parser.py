@@ -50,7 +50,7 @@ class MirLexer(Lexer):
         DEREF,
         TYPES,
         FUNCTIONS,
-        CONSTANTS,
+        CONSTANT,
         MOVE,
         STATEMENT,
         NUMBER,
@@ -81,11 +81,25 @@ class MirLexer(Lexer):
     REF = r'&'
     DEREF = r'\*'
     TYPES = r'|'.join(
-        [r'i32', r'u32', r'i64', r'u64', r'f32', r'f64', r'bool', r'char', r'str', r'String', r'\(\)', r'HashMap',
-         r'Index'])
+        [
+            r'i32',
+            r'u32',
+            r'i64',
+            r'u64',
+            r'f32',
+            r'f64',
+            r'bool',
+            r'char',
+            r'str',
+            r'String',
+            r'\(\)',
+            r'HashMap',
+            r'Index',
+        ]
+    )
     # TYPES = r'i32'
     FUNCTIONS = r'|'.join(["index", "insert", "from", "get"])
-    CONSTANTS = r'const'
+    CONSTANT = r'const'
     MOVE = r'move'
     RETURN = r'return'
     UNREACHABLE = r'unreachable'
@@ -125,6 +139,27 @@ class MirParser(Parser):
         self.types = {}
         self.names = {}
         # data-ir
+        self.stmt_id = -1
+        self.curr_stmt: ir.Statement = None
+
+    def get_curr_stmt_id(self):
+        if self.stmt_id == -1:
+            raise Exception("stmt_id not defined when used")
+        else:
+            # return curr and reset to -1
+            ret = self.stmt_id
+            self.stmt_id = -1
+            return ret
+
+    @staticmethod
+    def get_loc_int(loc):
+        # get int from location string
+        return int(re.sub(r'\D', '', loc))
+
+    def add_curr_stmt_and_reset(self):
+        global temp_stmts
+        temp_stmts.append(self.curr_stmt)
+        self.curr_stmt = ir.Statement()
 
     # function
     @_('FN NAME "(" PARAMS ")" "{" BB "}"')
@@ -143,7 +178,7 @@ class MirParser(Parser):
         return p.LOCATION
 
     # block
-    @_('BB ":" "{" stmtlist "}"')
+    @_('BB block_start ":" "{" stmtlist "}"')
     def block(self, p):
         global curr_bb_id
         try:
@@ -165,7 +200,9 @@ class MirParser(Parser):
 
     @_('')
     def block_start(self, _p):
-        print("block start")
+        print("block start, setup curr_stmt")
+        # setup curr_stmt
+        self.curr_stmt = ir.Statement()
 
     # bblist
     @_('block bblist')
@@ -179,7 +216,6 @@ class MirParser(Parser):
     # stmtlist -> stmtlist statement | statement
     @_('stmtlist statement')
     def stmtlist(self, p):
-        # do something with p.statement
         print('stmtlist, statment', p.statement)
         return p.stmtlist
 
@@ -188,8 +224,9 @@ class MirParser(Parser):
         print('stmtlist', p.statement)
         return [p.statement]
 
-    # assigment -> LOCATION = assigntype ;
-    # assigntype -> LOCATION | constant | borrow | function
+    # statement -> LOCATION = stmttype ; | GOTO ARROW LOCATION ; | UNREACHABLE ; | RETURN ;
+    # stmttype -> LOCATION | constant | borrow | function
+    # ctrlflow -> goto | unreachable | return
     # function -> TurboFish fun_goto | TurboFish
     # fun_goto -> ARROW fun_goto_location
     # fun_goto_location -> LOCATION | "[" cond_goto_loc "]"
@@ -198,9 +235,8 @@ class MirParser(Parser):
 
     # types -> TYPE
     # constant -> CONSTANT NUMBER _ TYPE
-    # borrow -> REF SOURCE | REFMUT SOURCE
-    # source -> LOCATION | ( source )
-    # source -> LOCATION | DEREF LOCATION
+    # borrow -> REF source | REFMUT source
+    # source -> ( source ) | LOCATION | DEREF LOCATION
 
     # <GenericType<u32, String>>::index(move _1, move _2) #-> bb42;
     # HashMap::<u32, String>::get::<u32>(move _1, move _2)#-> bb42;
@@ -217,105 +253,123 @@ class MirParser(Parser):
     # PARAM -> LOCATION | MODE LOCATION
     # MODE -> move
 
-    # goto -> GOTO ARROW LOCATION ;
-
-
-
-
     #####
-    # types
-    @_('TYPES')
-    def types(self, p):
-        return p.types
 
-
-    # assignment of location to location
-    @_('LOCATION "=" LOCATION ";"')
+    # statement -> LOCATION = stmttype | goto | unreachable | return;
+    @_('LOCATION "=" stmttype ";"')
     def statement(self, p):
-        assign_id = int(p.LOCATION0[1:])
-        value_id = int(p.LOCATION1[1:])
+        curr_stmt_id = self.get_loc_int(p.LOCATION)
+        last_stmt = self.curr_stmt
+        # if last stmt is an assignment, then we need to assign the curr_stmt_id
+        match last_stmt.stmt_type:
+            case ir.StatementType.ASSIGN:
+                # check location is not in set of seen locations of temp_stmts for current bb
+                seen = [n.lhs_location for n in temp_stmts]
+                if curr_stmt_id in seen:
+                    print(f'ERROR: curr_stmt_id {curr_stmt_id} already used')
+                    exit(1)
+                else:
+                    last_stmt.lhs_location = curr_stmt_id
+                    print(f"set lhs_location of last_stmt to {curr_stmt_id}")
+            case ir.StatementType.UNREACHABLE | ir.StatementType.RETURN:
+                pass
+            case ir.StatementType.GOTO:
+                pass
+        # add curr to temp and reinitialise self.curr_stmt
+        temp_stmts.append(self.curr_stmt)
+        self.curr_stmt = ir.Statement()
 
-        print('statement location assignment ', assign_id, ' value ', value_id)
-        return p.LOCATION0, p.LOCATION1
+        print('statement', p.LOCATION, p.stmttype)
+        return p.stmttype
 
-    # assignment constant to location
-    @_('LOCATION "=" CONSTANTS NUMBER "_" TYPES ";"')
+    # statement -> GOTO ARROW BB ;
+    @_('GOTO ARROW BB ";"')
     def statement(self, p):
-        print('const statement', p.LOCATION, p.NUMBER, p.TYPES)
-        location_id = int(p.LOCATION[1:])
-        # create Statement
-        stmt = ir.Statement(
-            lhs_location=location_id,
-            value_type=ir.ValueType.CONST,
-            rhs_value=p.NUMBER,
-            stmt_type=ir.StatementType.ASSIGN,
-        )
-        # add to temp stmts
-        temp_stmts.append(stmt)
+        print('goto', p.BB)
+        self.curr_stmt.stmt_type = ir.StatementType.GOTO
+        self.curr_stmt.bb_target = self.get_loc_int(p.BB)
+        self.add_curr_stmt_and_reset()
 
-        self.locations[location_id] = p.NUMBER
-        # maybe do check if fn-defined type corresponds with currently seen type
-        self.types[location_id] = p.TYPES
-        return p.LOCATION, p.NUMBER, p.TYPES
-
-    # mut borrow location statement
-    @_('LOCATION "=" REFMUT  "(" DEREF LOCATION ")" ";"')
-    def statement(self, p):
-        borrower_id = int(p.LOCATION0[1:])
-        borrowee_id = int(p.LOCATION1[1:])
-        print('mut borrow statement', borrower_id, borrowee_id)
-
-        # create Statement
-        stmt = ir.Statement(
-            lhs_location=borrower_id,
-            value_type=ir.ValueType.BORROW,
-            rhs_value=borrowee_id,
-            stmt_type=ir.StatementType.ASSIGN,
-        )
-        # add to temp stmts
-        temp_stmts.append(stmt)
-
-        # return borrower_id, borrowee_id
-
-    # deref location statement
-    @_('DEREF LOCATION')
-    def statement(self, p):
-        print('deref statement', p.LOCATION)
-        # do cfg deref location
-
-        return p.LOCATION
-
-    @_('RETURN ";"')
-    def statement(self, p):
-        print('statement return')
-        # add statement to temp stmts
-        temp_stmts.append(ir.Statement(
-            stmt_type=ir.StatementType.RETURN,
-        ))
-
-        # todo: close off current bb, or handled by block end action code?
-
-    # unreachable statement
+    # statement -> UNREACHABLE ;
     @_('UNREACHABLE ";"')
     def statement(self, p):
-        print('statement unreachable')
-        temp_stmts.append(ir.Statement(
-            stmt_type=ir.StatementType.UNREACHABLE,
-        ))
+        print('unreachable', p.UNREACHABLE)
+        self.curr_stmt.stmt_type = ir.StatementType.UNREACHABLE
+        self.add_curr_stmt_and_reset()
 
+    # statement -> RETURN ;
+    @_('RETURN ";"')
+    def statement(self, p):
+        print('return', p.RETURN)
+        self.curr_stmt.stmt_type = ir.StatementType.RETURN
+        self.add_curr_stmt_and_reset()
 
-    # todo GOTO EBNF:
+    # stmttype -> LOCATION | constant | borrow | goto | unreachable | return | function
+    @_('LOCATION')
+    def stmttype(self, p):
+        print('stmttype location', p.LOCATION)
+        # create statement
+        self.curr_stmt.stmt_type = ir.StatementType.ASSIGN
+        self.curr_stmt.rhs_location = self.get_loc_int(p.LOCATION)
 
-    # goto statment
-    @_('GOTO LOCATION ";"')
-    def goto(self, p):
-        print('goto statement', p.LOCATION)
-        # add statement to temp stmts
-        temp_stmts.append(ir.Statement(
-            stmt_type=ir.StatementType.GOTO,
-            rhs_value=p.LOCATION,
-        ))
+    @_('constant')
+    def stmttype(self, p):
+        print('stmttype', p.constant)
+        return p.constant
+
+    # constant -> CONSTANT NUMBER _ TYPE
+    @_('CONSTANT NUMBER "_" TYPES')
+    def constant(self, p):
+        print('constant', p.CONSTANT)
+        self.curr_stmt.stmt_type = ir.StatementType.ASSIGN
+        self.curr_stmt.rhs_value = p.NUMBER
+        self.curr_stmt.value_type = p.TYPES
+        self.curr_stmt.rhs_value = ir.ValueType.CONST
+
+    @_('borrow')
+    def stmttype(self, p):
+        print('stmttype', p.borrow)
+        self.curr_stmt.stmt_type = ir.StatementType.ASSIGN
+        return p.borrow
+
+    # borrow -> REF source | REFMUT source
+    @_('REF source')
+    def borrow(self, p):
+        print('borrow', p.source)
+        self.curr_stmt.value_type = ir.ValueType.BORROW
+        self.curr_stmt.mutability = False
+        return p.source
+
+    @_('REFMUT source')
+    def borrow(self, p):
+        print('borrow', p.source)
+        self.curr_stmt.value_type = ir.ValueType.BORROW
+        self.curr_stmt.mutability = True
+        return p.source
+
+    # source -> ( source ) | LOCATION | DEREF LOCATION
+    @_('"(" source ")"')
+    def source(self, p):
+        print('source parens', p.source)
+        return p.source
+
+    @_('LOCATION')
+    def source(self, p):
+        print('source location', p.LOCATION)
+        self.curr_stmt.rhs_location = self.get_loc_int(p.LOCATION)
         return p.LOCATION
+
+    @_('DEREF LOCATION')
+    def source(self, p):
+        print('source deref location', p.LOCATION)
+        self.curr_stmt.rhs_location = self.get_loc_int(p.LOCATION)
+        return p.LOCATION
+
+    # function -> TurboFish fun_goto | TurboFish
+    # fun_goto -> ARROW fun_goto_location
+    # fun_goto_location -> LOCATION | "[" cond_goto_loc "]"
+    # cond_goto_loc -> cond_goto_loc "," cond_goto_loc | cond_goto_loc
+    #                | NUMBER "_" types ":" LOCATION | OTHERWISE ":" LOCATION
 
     # <GenericType<u32, String>>::index(move _1, move _2) #-> bb42;
     # HashMap::<u32, String>::get::<u32>(move _1, move _2)#-> bb42;
@@ -343,6 +397,7 @@ class MirParser(Parser):
     def types(self, p):
         return p.types
     """
+
 
 def parse(mir_program):
     mir_lexer = MirLexer()
