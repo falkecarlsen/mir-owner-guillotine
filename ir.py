@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pprint import pprint
-from typing import Optional, Any, List, Set, Dict
+from typing import Optional, Any, List, Set, Dict, Tuple
 
 import numpy as np
 
@@ -51,6 +51,8 @@ class StatementType(Enum):
     """
 
     ASSIGN = auto()
+    FUNCTION_CALL = auto()
+    PRIMITIVE = auto()
     UNREACHABLE = auto()
     RETURN = auto()
     GOTO = auto()
@@ -68,7 +70,7 @@ class ValueType(Enum):
     CALL = auto()
 
 
-@dataclass
+@dataclass(kw_only=True)
 class Statement:
     """
     Statement occurring in MIR with concomitant data relevant for building CFG+BB IR
@@ -81,7 +83,6 @@ class Statement:
     rhs_location: Optional[int] = None
     rhs_op: Optional[str] = None
     rhs_value: Optional[Any] = None
-    bb_target: Optional[int] = None
 
     def __repr__(self):
         return (
@@ -92,8 +93,78 @@ class Statement:
             f"\t\trhs_value={self.rhs_value}, \n"
             f"\t\trhs_type={self.value_type}, \n"
             f"\t\trhs_op={self.rhs_op}, \n"
-            f"\t\tmutability={self.mutability})\n"
-            f"\t\tbb_target={self.bb_target})\n"
+            f"\t\tmutability={self.mutability}\n"
+        )
+
+
+class Mode(Enum):
+    """
+    Mode of ownership transfer (move or copy)
+    """
+    NONE = auto()
+    MOVE = auto()
+    COPY = auto()
+
+
+@dataclass(kw_only=True)
+class FunctionArg:
+    """
+    Function argument, mode (move, etc), location, constant, type of
+    """
+
+    mode: Mode = Mode.NONE
+    location: [int | None] = None
+    # constant (value, type)
+    constant: Optional[Tuple[Any, str]] = None
+    type: Optional[str] = None
+
+    def __repr__(self):
+        return (
+            f"\tFunctionArg(\n"
+            f"\t\tmode={self.mode},\n"
+            f"\t\tlocation={self.location}, \n"
+            f"\t\tconstant={self.constant}, \n"
+            f"\t\ttype={self.type}\n"
+        )
+
+
+@dataclass(kw_only=True)
+class FunctionStatement(Statement):
+    """
+    Function statement occurring in MIR with concomitant data relevant for building CFG+BB IR
+    """
+
+    function_method: Optional[str] = None
+    function_type: Optional[str] = None
+    function_args: Optional[List[FunctionArg]] = field(default_factory=list)
+    function_bb_goto: Optional[int] = None
+
+    def __repr__(self):
+        return (
+            f"\tFunctionStatement(\n"
+            f"\t\tfunction_method={self.function_method},\n"
+            f"\t\tfunction_type={self.function_type}, \n"
+            f"\t\tfunction_args={self.function_args}, \n"
+            f"\t\tfunction_bb_goto={self.function_bb_goto}, \n"
+        )
+
+
+@dataclass(kw_only=True)
+class PrimitiveFunctionStatement(Statement):
+    """
+    Primitive statement occurring in MIR with concomitant data relevant for building CFG+BB IR
+    """
+    primitive_type: str = None
+    primitive_args: Optional[List[FunctionArg]] = field(default_factory=list)
+    primitive_bb_goto: Optional[List[int]] = None
+
+    # repr
+    def __repr__(self):
+        return (
+            f"\tPrimitiveFunctionStatement(\n"
+            f"\t\tprimitive_type={self.primitive_type},\n"
+            f"\t\tprimitive_args=\n{self.primitive_args}, \n"
+            f"\t\tprimitive_bb_goto={self.primitive_bb_goto}\n"
         )
 
 

@@ -1,5 +1,4 @@
 import re
-from pprint import pprint
 from typing import List
 
 from sly import Lexer, Parser
@@ -43,21 +42,20 @@ class MirLexer(Lexer):
         REF,
         REFMUT,
         BB,
-        PARAMS,
-        EXPR,
         RETURN,
-        STMT,
         DEREF,
-        TYPES,
-        FUNCTIONS,
-        CONSTANT,
+        TYPENAMES,
+        METHODNAMES,
+        CONST,
         MOVE,
-        STATEMENT,
         NUMBER,
         UNREACHABLE,
         GOTO,
         ARROW,
         COLONTWICE,
+        STRING,
+        OTHERWISE,
+        PRIMITIVES,
     }
     ignore = ' \t'
     # ignore // comments
@@ -70,17 +68,17 @@ class MirLexer(Lexer):
     LETMUT = r'letmut'
     BB = r'bb\d+'
 
-    # TYPE = r'[a-zA-Z_][a-zA-Z0-9_] | \(\)*'
-    PARAMS = r'\((\s*[a-zA-Z_][a-zA-Z0-9_]*\s*,)*\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\)'
-    EXPR = r'\((\s*[a-zA-Z_][a-zA-Z0-9_]*\s*,)*\s*[a-zA-Z_][a-zA-Z0-=9_]*\s*\)'
-
     ARROW = r'->'
     GOTO = r'goto'
     COLONTWICE = r'::'
     REFMUT = r'&mut'
     REF = r'&'
     DEREF = r'\*'
-    TYPES = r'|'.join(
+    # s = ["Hashmap", "u32", "String", "string", "str", "Some", "std", "Index"]
+    # m = ["insert", "get", "index", "from", "discriminant", "switchInt"]
+    # stucts -> '|'.join(s) + '|'.join(['&'+n for n in s]) + '|'.join(['&mut'+n for n in s])
+    # methods -> '|'.join(m)
+    TYPENAMES = r'|'.join(
         [
             r'i32',
             r'u32',
@@ -88,21 +86,26 @@ class MirLexer(Lexer):
             r'u64',
             r'f32',
             r'f64',
+            r'isize',
             r'bool',
             r'char',
             r'str',
+            r'string',
             r'String',
-            r'\(\)',
+            r'Some',
             r'HashMap',
             r'Index',
         ]
     )
-    # TYPES = r'i32'
-    FUNCTIONS = r'|'.join(["index", "insert", "from", "get"])
-    CONSTANT = r'const'
+
+    METHODNAMES = r'|'.join(["index", "insert", "from", "get"])
+    PRIMITIVES = r'|'.join(["switchInt", "discriminant"])
+    CONST = r'const'
     MOVE = r'move'
     RETURN = r'return'
     UNREACHABLE = r'unreachable'
+    OTHERWISE = r'otherwise'
+    STRING = r'\".*?\"'
 
     # Ignored pattern
     ignore_newline = r'\n+'
@@ -128,53 +131,40 @@ class MirParser(Parser):
     debugfile = 'parser.out'
     start = 'block'
 
-    precedence = (
-        ('left', STMT),
-        ('left', LOCATION),
-    )
-
     def __init__(self):
         # legacy
         self.locations = {}
         self.types = {}
         self.names = {}
         # data-ir
-        self.stmt_id = -1
-        self.curr_stmt: ir.Statement = None
-
-    def get_curr_stmt_id(self):
-        if self.stmt_id == -1:
-            raise Exception("stmt_id not defined when used")
-        else:
-            # return curr and reset to -1
-            ret = self.stmt_id
-            self.stmt_id = -1
-            return ret
+        self.stmt: ir.Statement = ir.Statement()
 
     @staticmethod
-    def get_loc_int(loc):
+    def get_loc_or_bb_int(string):
         # get int from location string
-        return int(re.sub(r'\D', '', loc))
+        if string is list:
+            return string
+        return int(re.sub(r'\D', '', string))
 
     def add_curr_stmt_and_reset(self):
         global temp_stmts
-        temp_stmts.append(self.curr_stmt)
-        self.curr_stmt = ir.Statement()
+        temp_stmts.append(self.stmt)
+        self.stmt = ir.Statement()
 
-    # function
-    @_('FN NAME "(" PARAMS ")" "{" BB "}"')
+    # function fixme
+    @_('FN NAME "(" "," ")" "{" BB "}"')
     def function(self, p):
         print('function', p.NAME, p.params, p.blocks)
 
     # MIR type definitions
-    @_('LET LOCATION ":" TYPES ";"')
+    @_('LET LOCATION ":" TYPENAMES ";"')
     def location_type_immut(self, p):
-        self.types[p.LOCATION] = p.TYPE
+        self.types[p.LOCATION] = p.TYPENAMES
         return p.LOCATION
 
-    @_('LETMUT LOCATION ":" TYPES ";"')
+    @_('LETMUT LOCATION ":" TYPENAMES ";"')
     def location_type_mut(self, p):
-        self.types[p.LOCATION] = p.TYPE
+        self.types[p.LOCATION] = p.TYPENAMES
         return p.LOCATION
 
     # block
@@ -200,9 +190,7 @@ class MirParser(Parser):
 
     @_('')
     def block_start(self, _p):
-        print("block start, setup curr_stmt")
-        # setup curr_stmt
-        self.curr_stmt = ir.Statement()
+        print("block start")
 
     # bblist
     @_('block bblist')
@@ -226,7 +214,6 @@ class MirParser(Parser):
 
     # statement -> LOCATION = stmttype ; | GOTO ARROW LOCATION ; | UNREACHABLE ; | RETURN ;
     # stmttype -> LOCATION | constant | borrow | function
-    # ctrlflow -> goto | unreachable | return
     # function -> TurboFish fun_goto | TurboFish
     # fun_goto -> ARROW fun_goto_location
     # fun_goto_location -> LOCATION | "[" cond_goto_loc "]"
@@ -234,35 +221,40 @@ class MirParser(Parser):
     #                | NUMBER "_" types ":" LOCATION | OTHERWISE ":" LOCATION
 
     # types -> TYPE
-    # constant -> CONSTANT NUMBER _ TYPE
+    # constant -> CONST NUMBER _ TYPE
     # borrow -> REF source | REFMUT source
     # source -> ( source ) | LOCATION | DEREF LOCATION
 
+    # turbofish, method call, and generics ebnf for rust mir
+    """
+                     |-| method call on Struct
+    Struct::<A,B,C>::new(x, y) -> bb1;
+    ^ struct ^ type-args ^value args
+    """
+
     # <GenericType<u32, String>>::index(move _1, move _2) #-> bb42;
-    # HashMap::<u32, String>::get::<u32>(move _1, move _2)#-> bb42;
-    # std::string::String
-    # &std::string::String
-    # &std::collections::HashMap<u32, std::string::String>
 
-    # TurboFish -> GenericType :: Function
-    # GenericType -> < GenericType Types > | Types
-    # ConvertedType -> GenericType "as" GenericType
-    # Types -> Type | ConvertedType
-    # Function -> FUNCTIONS "(" PARAMS ")"
-    # PARAMS -> PARAMS "," PARAM | PARAM
-    # PARAM -> LOCATION | MODE LOCATION
-    # MODE -> move
+    # todo: function calls
+    # _1 = HashMap::<u32, String>::insert(move _2, const 42_u32, move _3) -> bb1;
+    # _1 = HashMap::<u32, String>::insert(move _17, const 42_u32, move _18) -> bb7_B;
+    # _1 = HashMap::<u32, String>::get::<u32>(move _3, move _5) -> bb1;
+    # _1 = <HashMap<u32, String> as Index<&u32>>::index(move _2, move _3) -> bb1;
+    # _1 = <HashMap<u32, String> as Index<&u32>>::index(move _11, move _12) -> bb5;
+    # _1 = <String as From<&str>>::from(const "init") -> bb6_B;
+    # _1 = discriminant(_1);
+    # _1 = ((_2 as Some).0: & std::string::String)
+    # switchInt(move _7) -> [0_isize: bb2, 1_isize: bb4, otherwise: bb3];
 
-    #####
-
-    # statement -> LOCATION = stmttype | goto | unreachable | return;
+    # statement -> LOCATION = stmttype ; | GOTO ARROW BB ; | UNREACHABLE ; | RETURN | primitives ;
+    #              | todo primitives (switchInt, discriminant);
     @_('LOCATION "=" stmttype ";"')
     def statement(self, p):
-        curr_stmt_id = self.get_loc_int(p.LOCATION)
-        last_stmt = self.curr_stmt
+        curr_stmt_id = self.get_loc_or_bb_int(p.LOCATION)
+        last_stmt = self.stmt
         # if last stmt is an assignment, then we need to assign the curr_stmt_id
         match last_stmt.stmt_type:
-            case ir.StatementType.ASSIGN:
+            # do location assignment
+            case ir.StatementType.ASSIGN | ir.StatementType.FUNCTION_CALL:
                 # check location is not in set of seen locations of temp_stmts for current bb
                 seen = [n.lhs_location for n in temp_stmts]
                 if curr_stmt_id in seen:
@@ -276,75 +268,72 @@ class MirParser(Parser):
             case ir.StatementType.GOTO:
                 pass
         # add curr to temp and reinitialise self.curr_stmt
-        temp_stmts.append(self.curr_stmt)
-        self.curr_stmt = ir.Statement()
+        self.add_curr_stmt_and_reset()
 
         print('statement', p.LOCATION, p.stmttype)
         return p.stmttype
 
-    # statement -> GOTO ARROW BB ;
     @_('GOTO ARROW BB ";"')
     def statement(self, p):
         print('goto', p.BB)
-        self.curr_stmt.stmt_type = ir.StatementType.GOTO
-        self.curr_stmt.bb_target = self.get_loc_int(p.BB)
+        self.stmt.stmt_type = ir.StatementType.GOTO
+        self.stmt.bb_target = self.get_loc_or_bb_int(p.BB)
         self.add_curr_stmt_and_reset()
 
-    # statement -> UNREACHABLE ;
     @_('UNREACHABLE ";"')
     def statement(self, p):
         print('unreachable', p.UNREACHABLE)
-        self.curr_stmt.stmt_type = ir.StatementType.UNREACHABLE
+        self.stmt.stmt_type = ir.StatementType.UNREACHABLE
         self.add_curr_stmt_and_reset()
 
-    # statement -> RETURN ;
     @_('RETURN ";"')
     def statement(self, p):
         print('return', p.RETURN)
-        self.curr_stmt.stmt_type = ir.StatementType.RETURN
+        self.stmt.stmt_type = ir.StatementType.RETURN
         self.add_curr_stmt_and_reset()
 
-    # stmttype -> LOCATION | constant | borrow | goto | unreachable | return | function
+    # stmttype -> LOCATION | constant | borrow | goto | unreachable | return | function_call
     @_('LOCATION')
     def stmttype(self, p):
         print('stmttype location', p.LOCATION)
         # create statement
-        self.curr_stmt.stmt_type = ir.StatementType.ASSIGN
-        self.curr_stmt.rhs_location = self.get_loc_int(p.LOCATION)
+        self.stmt.stmt_type = ir.StatementType.ASSIGN
+        self.stmt.rhs_location = self.get_loc_or_bb_int(p.LOCATION)
 
     @_('constant')
     def stmttype(self, p):
         print('stmttype', p.constant)
+        self.stmt.stmt_type = ir.StatementType.ASSIGN
+        self.stmt.rhs_value = p.constant[0]
+        self.stmt.value_type = p.constant[0]
+        self.stmt.rhs_value = ir.ValueType.CONST
         return p.constant
 
-    # constant -> CONSTANT NUMBER _ TYPE
-    @_('CONSTANT NUMBER "_" TYPES')
+    # constant -> CONST NUMBER _ TYPE
+    @_('CONST NUMBER "_" TYPENAMES')
     def constant(self, p):
-        print('constant', p.CONSTANT)
-        self.curr_stmt.stmt_type = ir.StatementType.ASSIGN
-        self.curr_stmt.rhs_value = p.NUMBER
-        self.curr_stmt.value_type = p.TYPES
-        self.curr_stmt.rhs_value = ir.ValueType.CONST
+        print('constant item', p.CONST, p.NUMBER, p.TYPENAMES)
+        return p.NUMBER, p.TYPENAMES
 
     @_('borrow')
     def stmttype(self, p):
         print('stmttype', p.borrow)
-        self.curr_stmt.stmt_type = ir.StatementType.ASSIGN
+        self.stmt.stmt_type = ir.StatementType.ASSIGN
         return p.borrow
 
     # borrow -> REF source | REFMUT source
     @_('REF source')
     def borrow(self, p):
         print('borrow', p.source)
-        self.curr_stmt.value_type = ir.ValueType.BORROW
-        self.curr_stmt.mutability = False
+        self.stmt.value_type = ir.ValueType.BORROW
+        self.stmt.mutability = False
         return p.source
 
     @_('REFMUT source')
     def borrow(self, p):
         print('borrow', p.source)
-        self.curr_stmt.value_type = ir.ValueType.BORROW
-        self.curr_stmt.mutability = True
+        self.stmt.value_type = ir.ValueType.BORROW
+        self.stmt.mutability = True
         return p.source
 
     # source -> ( source ) | LOCATION | DEREF LOCATION
@@ -356,15 +345,174 @@ class MirParser(Parser):
     @_('LOCATION')
     def source(self, p):
         print('source location', p.LOCATION)
-        self.curr_stmt.rhs_location = self.get_loc_int(p.LOCATION)
+        self.stmt.rhs_location = self.get_loc_or_bb_int(p.LOCATION)
         return p.LOCATION
 
     @_('DEREF LOCATION')
     def source(self, p):
         print('source deref location', p.LOCATION)
-        self.curr_stmt.rhs_location = self.get_loc_int(p.LOCATION)
+        self.stmt.rhs_location = self.get_loc_or_bb_int(p.LOCATION)
         return p.LOCATION
 
+    # todo primitives
+    @_('PRIMITIVES "(" valueargs ")" goto_cond_block ";"')
+    def statement(self, p):
+        print('primitives', p.PRIMITIVES, p.valueargs, p.goto_cond_block)
+        self.stmt = ir.PrimitiveFunctionStatement()
+
+        self.stmt.primitive_type = p.PRIMITIVES
+        self.stmt.primitive_args = p.valueargs
+        self.stmt.primitive_bb_goto = p.goto_cond_block
+        self.add_curr_stmt_and_reset()
+
+    # todo: function
+    @_('function_call')
+    def stmttype(self, p):
+        print('stmttype function_call', p.function_call)
+        return p.function_call
+
+    # function_call -> turbofish COLONTWICE methodcall ( valueargs ) goto_block | TYPENAMES COLONTWICE ( valueargs ) goto_cond_block
+    # FIXME: maybe secondary production is not required, goto_cond_block only appears in primitives
+    #   NOTE: turbofish also called FQTS (Fully Qualified Trait Syntax)
+    @_('turbofish COLONTWICE methodcall "(" valueargs ")" goto_block')
+    def function_call(self, p):
+        print('function_call', p.methodcall)
+        self.stmt = ir.FunctionStatement()
+        self.stmt.function_type = p.turbofish
+        self.stmt.function_method = p.methodcall
+        self.stmt.function_args = p.valueargs
+        self.stmt.function_bb_goto = p.goto_block
+
+    @_('TYPENAMES COLONTWICE "(" valueargs ")" goto_cond_block')
+    def function_call(self, p):
+        print('function_call', p.TYPENAMES)
+        # todo create stmt for function call with goto_cond_block
+        self.stmt.stmt_type = ir.StatementType.FUNCTION_CALL
+
+    # turbofish -> TYPENAMES COLONTWICE < typeargs >
+    @_('TYPENAMES COLONTWICE "<" typeargs ">"')
+    def turbofish(self, p):
+        print('turbofish', p.TYPENAMES)
+        return p.TYPENAMES, [p.typeargs]
+
+    # typeargs -> typearg "," typeargs | typearg #fixme shift/reduce conflict, sly fixes with reduce (precedence prettier?)
+    @_('typeargs "," typearg')
+    def typeargs(self, p):
+        print('typeargs', p.typeargs, p.typearg)
+        return p.typeargs + [p.typearg]
+
+    @_('typearg')
+    def typeargs(self, p):
+        print('typearg', p.typearg)
+        return p.typearg
+
+    # typearg -> TYPENAMES | TYPENAMES , TYPENAMES
+    @_('TYPENAMES')
+    def typearg(self, p):
+        print('typearg', p.TYPENAMES)
+        return p.TYPENAMES
+
+    @_('TYPENAMES "," TYPENAMES')
+    def typearg(self, p):
+        print('typearg', p.TYPENAMES0, p.TYPENAMES1)
+        return [p.TYPENAMES0, p.TYPENAMES1]
+
+    # methodcall -> METHODNAMES | METHODNAMES COLONTWICE < typeargs > // b/c ::get::<u32>
+    @_('METHODNAMES')
+    def methodcall(self, p):
+        print('methodcall', p.METHODNAMES)
+        return p.METHODNAMES
+
+    @_('METHODNAMES COLONTWICE "<" typeargs ">"')
+    def methodcall(self, p):
+        print('methodcall', p.METHODNAMES)
+        return p.METHODNAMES
+
+    # valueargs -> valueargs "," valuearg | valuearg
+    @_('valueargs "," valuearg')
+    def valueargs(self, p):
+        print('valueargs', p.valueargs, p.valuearg)
+        return [p.valueargs] + [p.valuearg]
+
+    @_('valuearg')
+    def valueargs(self, p):
+        print('valuearg', p.valuearg)
+        return p.valuearg
+
+    # valuearg -> LOCATION | MOVE LOCATION | valuearg_constant (reuse from stmt) | CONST STRING
+    @_('LOCATION')
+    def valuearg(self, p):
+        print('valuearg loc', p.LOCATION)
+        return ir.FunctionArg(location=p.LOCATION)
+
+    @_('MOVE LOCATION')
+    def valuearg(self, p):
+        print('valuearg move loc', p.LOCATION)
+        return ir.FunctionArg(mode=ir.Mode.MOVE, location=p.LOCATION)
+
+    @_('constant')
+    def valuearg(self, p):
+        print('valuearg constant', p.constant)
+        # p.constant[0] = number, p.constant[1] = type
+        return ir.FunctionArg(constant=(p.constant[0], p.constant[1]))
+
+    @_('CONST STRING')
+    def valuearg(self, p):
+        print('valuearg', p.STRING)
+        # from method(const "init"), must be String due to typing of function call
+        return ir.FunctionArg(constant=(p.STRING, "String"))
+
+    # goto_block -> ARROW BB
+    @_('ARROW BB')
+    def goto_block(self, p):
+        print('goto_block', p.BB)
+        return self.get_loc_or_bb_int(p.BB)
+
+    # goto_cond_block -> ARROW "[" goto_params "]"
+    @_('ARROW "[" goto_params "]"')
+    def goto_cond_block(self, p):
+        print('goto_cond_block', p.goto_params)
+        return p.goto_params
+
+    # goto_params -> goto_params "," goto_param | goto_param
+    @_('goto_params "," goto_param')
+    def goto_params(self, p):
+        print('goto_params', p.goto_params, p.goto_param)
+
+        # neatly:tm: collect bb gotos in list
+        if p.goto_params is None:
+            return [self.get_loc_or_bb_int(p.goto_param)]
+        elif type(p.goto_params) is list:
+            return p.goto_params + [self.get_loc_or_bb_int(p.goto_param)]
+        else:
+            return [self.get_loc_or_bb_int(p.goto_params)] + [self.get_loc_or_bb_int(p.goto_param)]
+
+    @_('goto_param')
+    def goto_params(self, p):
+        print('goto_param', p.goto_param)
+        return p.goto_param
+
+    # goto_param -> NUMBER "_" TYPENAMES ":" BB | OTHERWISE ":" BB
+    @_('NUMBER "_" TYPENAMES ":" BB')
+    def goto_param(self, p):
+        print('goto_param', p.NUMBER, p.TYPENAMES, p.BB)
+        return p.BB
+
+    @_('OTHERWISE ":" BB')
+    def goto_param(self, p):
+        print('goto_param', p.BB)
+        return p.BB
+
+    # todo scratch below?
+    # struct -> TYPENAMES | < TYPENAMES > | < TYPENAMES as TYPENAMES > | < TYPENAMES as TYPENAMES > COLONTWICE
+    # typeargs -> typeargs "," typearg | typearg
+    # typearg -> TYPENAMES | REF TYPENAMES | REFMUT TYPENAMES
+    # method -> METHODNAMES
+    # valueargs -> valueargs "," valuearg | valuearg
+    # valuearg -> LOCATION | REF LOCATION | REFMUT LOCATION | CONST NUMBER _ TYPENAMES
+    #                      | CONST STRING MOVE LOCATION
+
+    # fixme scratch below:
     # function -> TurboFish fun_goto | TurboFish
     # fun_goto -> ARROW fun_goto_location
     # fun_goto_location -> LOCATION | "[" cond_goto_loc "]"
