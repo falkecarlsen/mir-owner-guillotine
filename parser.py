@@ -56,6 +56,7 @@ class MirLexer(Lexer):
         STRING,
         OTHERWISE,
         PRIMITIVES,
+        AS,
     }
     ignore = ' \t'
     # ignore // comments
@@ -95,8 +96,10 @@ class MirLexer(Lexer):
             r'Some',
             r'HashMap',
             r'Index',
+            r'From',
         ]
     )
+    AS = r'as'
 
     METHODNAMES = r'|'.join(["index", "insert", "from", "get"])
     PRIMITIVES = r'|'.join(["switchInt", "discriminant"])
@@ -168,7 +171,7 @@ class MirParser(Parser):
         return p.LOCATION
 
     # block
-    @_('BB block_start ":" "{" stmtlist "}"')
+    @_('BB ":" "{" stmtlist "}"')
     def block(self, p):
         global curr_bb_id
         try:
@@ -212,41 +215,7 @@ class MirParser(Parser):
         print('stmtlist', p.statement)
         return [p.statement]
 
-    # statement -> LOCATION = stmttype ; | GOTO ARROW LOCATION ; | UNREACHABLE ; | RETURN ;
-    # stmttype -> LOCATION | constant | borrow | function
-    # function -> TurboFish fun_goto | TurboFish
-    # fun_goto -> ARROW fun_goto_location
-    # fun_goto_location -> LOCATION | "[" cond_goto_loc "]"
-    # cond_goto_loc -> cond_goto_loc "," cond_goto_loc | cond_goto_loc
-    #                | NUMBER "_" types ":" LOCATION | OTHERWISE ":" LOCATION
-
-    # types -> TYPE
-    # constant -> CONST NUMBER _ TYPE
-    # borrow -> REF source | REFMUT source
-    # source -> ( source ) | LOCATION | DEREF LOCATION
-
-    # turbofish, method call, and generics ebnf for rust mir
-    """
-                     |-| method call on Struct
-    Struct::<A,B,C>::new(x, y) -> bb1;
-    ^ struct ^ type-args ^value args
-    """
-
-    # <GenericType<u32, String>>::index(move _1, move _2) #-> bb42;
-
-    # todo: function calls
-    # _1 = HashMap::<u32, String>::insert(move _2, const 42_u32, move _3) -> bb1;
-    # _1 = HashMap::<u32, String>::insert(move _17, const 42_u32, move _18) -> bb7_B;
-    # _1 = HashMap::<u32, String>::get::<u32>(move _3, move _5) -> bb1;
-    # _1 = <HashMap<u32, String> as Index<&u32>>::index(move _2, move _3) -> bb1;
-    # _1 = <HashMap<u32, String> as Index<&u32>>::index(move _11, move _12) -> bb5;
-    # _1 = <String as From<&str>>::from(const "init") -> bb6_B;
-    # _1 = discriminant(_1);
-    # _1 = ((_2 as Some).0: & std::string::String)
-    # switchInt(move _7) -> [0_isize: bb2, 1_isize: bb4, otherwise: bb3];
-
     # statement -> LOCATION = stmttype ; | GOTO ARROW BB ; | UNREACHABLE ; | RETURN | primitives ;
-    #              | todo primitives (switchInt, discriminant);
     @_('LOCATION "=" stmttype ";"')
     def statement(self, p):
         curr_stmt_id = self.get_loc_or_bb_int(p.LOCATION)
@@ -366,6 +335,32 @@ class MirParser(Parser):
         self.add_curr_stmt_and_reset()
 
     # todo: function
+    """              |-| method call on Struct
+    Struct::<A,B,C>::new(x, y) -> bb1;
+    ^ struct ^ type-args ^value args
+    """
+
+    # issue is recognising all:
+    #   Type::<Type, Type>::method(args)
+    #   Type::<Type, Type>::method::<Type, Type>(args) fixme
+    # function_call -> generic COLONTWICE method_call ( valueargs ) goto_block
+    # method_call -> METHODNAME | METHODNAME turbofish
+    # turbofish -> COLONTWICE "<" typeargs ">"
+    # generic -> generic COLONTWICE "<" typeargs ">" cast
+    #            | TYPENAMES "<" typeargs ">" cast
+    #            | TYPENAMES
+    #            | generic cast
+    #            | "<" generic ">"
+    # cast -> AS TYPENAMES < typeargs > | empty
+    # typeargs -> typearg "," typeargs | typearg
+    # typearg -> TYPENAMES | REF TYPENAMES | REFMUT TYPENAMES
+
+    # <HashMap<u32, String> as Index<&u32>>::index(move _2, move _3) -> bb69
+    # <String as From<&str>>::from(const "init") -> bb69
+
+
+
+
     @_('function_call')
     def stmttype(self, p):
         print('stmttype function_call', p.function_call)
@@ -395,27 +390,16 @@ class MirParser(Parser):
         print('turbofish', p.TYPENAMES)
         return p.TYPENAMES, [p.typeargs]
 
-    # typeargs -> typearg "," typeargs | typearg #fixme shift/reduce conflict, sly fixes with reduce (precedence prettier?)
-    @_('typeargs "," typearg')
+    # typeargs -> TYPENAMES "," typeargs | TYPENAMES
+    @_('typeargs "," TYPENAMES')
     def typeargs(self, p):
-        print('typeargs', p.typeargs, p.typearg)
-        return p.typeargs + [p.typearg]
+        print('typeargs', p.typeargs, p.TYPENAMES)
+        return p.typeargs + [p.TYPENAMES]
 
-    @_('typearg')
-    def typeargs(self, p):
-        print('typearg', p.typearg)
-        return p.typearg
-
-    # typearg -> TYPENAMES | TYPENAMES , TYPENAMES
     @_('TYPENAMES')
-    def typearg(self, p):
+    def typeargs(self, p):
         print('typearg', p.TYPENAMES)
-        return p.TYPENAMES
-
-    @_('TYPENAMES "," TYPENAMES')
-    def typearg(self, p):
-        print('typearg', p.TYPENAMES0, p.TYPENAMES1)
-        return [p.TYPENAMES0, p.TYPENAMES1]
+        return [p.TYPENAMES]
 
     # methodcall -> METHODNAMES | METHODNAMES COLONTWICE < typeargs > // b/c ::get::<u32>
     @_('METHODNAMES')
@@ -431,7 +415,7 @@ class MirParser(Parser):
     # valueargs -> valueargs "," valuearg | valuearg
     @_('valueargs "," valuearg')
     def valueargs(self, p):
-        print('valueargs', p.valueargs, p.valuearg)
+        print('valueargs', p.valuearg)
         return [p.valueargs] + [p.valuearg]
 
     @_('valuearg')
@@ -503,48 +487,6 @@ class MirParser(Parser):
         print('goto_param', p.BB)
         return p.BB
 
-    # todo scratch below?
-    # struct -> TYPENAMES | < TYPENAMES > | < TYPENAMES as TYPENAMES > | < TYPENAMES as TYPENAMES > COLONTWICE
-    # typeargs -> typeargs "," typearg | typearg
-    # typearg -> TYPENAMES | REF TYPENAMES | REFMUT TYPENAMES
-    # method -> METHODNAMES
-    # valueargs -> valueargs "," valuearg | valuearg
-    # valuearg -> LOCATION | REF LOCATION | REFMUT LOCATION | CONST NUMBER _ TYPENAMES
-    #                      | CONST STRING MOVE LOCATION
-
-    # fixme scratch below:
-    # function -> TurboFish fun_goto | TurboFish
-    # fun_goto -> ARROW fun_goto_location
-    # fun_goto_location -> LOCATION | "[" cond_goto_loc "]"
-    # cond_goto_loc -> cond_goto_loc "," cond_goto_loc | cond_goto_loc
-    #                | NUMBER "_" types ":" LOCATION | OTHERWISE ":" LOCATION
-
-    # <GenericType<u32, String>>::index(move _1, move _2) #-> bb42;
-    # HashMap::<u32, String>::get::<u32>(move _1, move _2)#-> bb42;
-    # std::string::String
-    # &std::string::String
-    # &std::collections::HashMap<u32, std::string::String>
-
-    # TurboFish -> GenericType :: Function
-    # GenericType -> < GenericType Types > | Types
-    # ConvertedType -> GenericType "as" GenericType
-    # Types -> Type | ConvertedType
-    # Function -> FUNCTIONS "(" PARAMS ")"
-    # PARAMS -> PARAMS "," PARAM | PARAM
-    # PARAM -> LOCATION | MODE LOCATION
-    # MODE -> move
-    """
-    # function call
-    @_('LOCATION "=" types COLONTWICE FUNCTIONS "(" PARAMS ")" GOTO_FUNCTION ";"')
-    def statement(self, p):
-        print('function call statement', p.LOCATION, p.types, p.FUNCTIONS, p.PARAMS, p.GOTO)
-        return p.types, p.FUNCTIONS, p.PARAMS
-
-
-    @_('TYPES "<" types ">"')
-    def types(self, p):
-        return p.types
-    """
 
 
 def parse(mir_program):
@@ -558,7 +500,7 @@ if __name__ == '__main__':
     unbold = '\033[0m'
     header = "=" * 80
 
-    text = open('mir-input-grammar/pass/test.mir', 'r').read()
+    text = open('mir-input-grammar/pass/functions.mir', 'r').read()
 
     print(f"{header}\nlexing: ")
     mir_lexer = MirLexer()
