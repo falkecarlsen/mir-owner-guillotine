@@ -132,12 +132,7 @@ class MirParser(Parser):
     start = 'block'
 
     def __init__(self):
-        # legacy
         self.curr_bb_id: int = -1
-        self.locations = {}
-        self.types = {}
-        self.names = {}
-        # data-ir
         self.cfg: ir.CFG = ir.CFG()
         self.temp_stmts: List[ir.Statement] = []
         self.stmt: ir.Statement = ir.Statement()
@@ -561,7 +556,7 @@ if __name__ == '__main__':
     unbold = '\033[0m'
     header = "=" * 80
 
-    text = open('mir-input-grammar/pass/functions.mir', 'r').read()
+    text = open('mir-source/expect-pass/functions.mir', 'r').read()
 
     print(f"{header}\nlexing: ")
     mir_lexer = MirLexer()
