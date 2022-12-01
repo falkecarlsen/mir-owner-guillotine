@@ -101,6 +101,7 @@ class Mode(Enum):
     """
     Mode of ownership transfer (move or copy)
     """
+
     NONE = auto()
     MOVE = auto()
     COPY = auto()
@@ -154,6 +155,7 @@ class PrimitiveFunctionStatement(Statement):
     """
     Primitive statement occurring in MIR with concomitant data relevant for building CFG+BB IR
     """
+
     primitive_type: str = None
     primitive_args: Optional[List[FunctionArg]] = field(default_factory=list)
     primitive_bb_goto: Optional[List[int]] = None
@@ -238,8 +240,7 @@ class CFG:
 
     def pprint(self):
         for n in self.bbs:
-            print(f"BB {n.name}:")
-            [print(s) for s in n.stmts]
+            print(f"BB {n.name}:\n\tSucc: {n.succ}\n\tPred: {n.pred}\n\tStmts (num: {len(n.stmts)}: {n.stmts}")
 
 
 class CFGUDChain(CFG):

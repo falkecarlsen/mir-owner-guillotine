@@ -24,10 +24,6 @@ Rust MIR simplified grammar for borrow-checking and CFG generation
 <literal> ::= [0-9]+
 """
 
-cfg = ir.CFG()
-curr_bb_id = -1
-temp_stmts: List[ir.Statement] = []
-
 
 # noinspection PyUnresolvedReferences,PyUnboundLocalVariable
 class MirLexer(Lexer):
@@ -97,12 +93,13 @@ class MirLexer(Lexer):
             r'HashMap',
             r'Index',
             r'From',
+            r'discriminant',
         ]
     )
     AS = r'as'
 
     METHODNAMES = r'|'.join(["index", "insert", "from", "get"])
-    PRIMITIVES = r'|'.join(["switchInt", "discriminant"])
+    PRIMITIVES = r'|'.join(["switchInt"])
     CONST = r'const'
     MOVE = r'move'
     RETURN = r'return'
@@ -136,10 +133,13 @@ class MirParser(Parser):
 
     def __init__(self):
         # legacy
+        self.curr_bb_id: int = -1
         self.locations = {}
         self.types = {}
         self.names = {}
         # data-ir
+        self.cfg: ir.CFG = ir.CFG()
+        self.temp_stmts: List[ir.Statement] = []
         self.stmt: ir.Statement = ir.Statement()
 
     @staticmethod
@@ -150,8 +150,7 @@ class MirParser(Parser):
         return int(re.sub(r'\D', '', string))
 
     def add_curr_stmt_and_reset(self):
-        global temp_stmts
-        temp_stmts.append(self.stmt)
+        self.temp_stmts.append(self.stmt)
         self.stmt = ir.Statement()
 
     # function fixme
@@ -173,23 +172,22 @@ class MirParser(Parser):
     # block
     @_('BB ":" "{" stmtlist "}"')
     def block(self, p):
-        global curr_bb_id
         try:
-            curr_bb_id = int(p.BB[-1])
+            self.curr_bb_id = self.get_loc_or_bb_int(p.BB)
             # create BasicBlock and add to CFG
-            bb = ir.BasicBlock(curr_bb_id)
+            bb = ir.BasicBlock(self.curr_bb_id)
             # add temp statements to BasicBlock
-            bb.add_statements(temp_stmts)
-            cfg.add_bb(bb)
+            bb.add_statements(self.temp_stmts)
+            self.cfg.add_bb(bb)
 
         except ValueError:
             print('ERROR: Invalid BB id', p.BB)
             exit(1)
 
-        print(f'block{curr_bb_id} end')
-        print(f"flushing {len(temp_stmts)} temp_stmts")
-        temp_stmts.clear()
-        return cfg
+        print(f'block{self.curr_bb_id} end')
+        print(f"flushing {len(self.temp_stmts)} temp_stmts")
+        self.temp_stmts.clear()
+        return self.cfg
 
     @_('')
     def block_start(self, _p):
@@ -220,7 +218,12 @@ class MirParser(Parser):
     def statement(self, p):
         curr_stmt_id = self.get_loc_or_bb_int(p.LOCATION)
         last_stmt = self.stmt
+        # if stmttype is function or primitive, just return p.stmttype
+        stmttype = p.stmttype
+        if stmttype is ir.FunctionStatement or stmttype is ir.PrimitiveFunctionStatement:
+            return stmttype
         # if last stmt is an assignment, then we need to assign the curr_stmt_id
+        # fixme, not needed?
         match last_stmt.stmt_type:
             # do location assignment
             case ir.StatementType.ASSIGN | ir.StatementType.FUNCTION_CALL:
@@ -323,16 +326,20 @@ class MirParser(Parser):
         self.stmt.rhs_location = self.get_loc_or_bb_int(p.LOCATION)
         return p.LOCATION
 
-    # todo primitives
     @_('PRIMITIVES "(" valueargs ")" goto_cond_block ";"')
     def statement(self, p):
-        print('primitives', p.PRIMITIVES, p.valueargs, p.goto_cond_block)
+        print('stmt primitive', p.PRIMITIVES, p.valueargs, p.goto_cond_block if p.goto_cond_block else '')
         self.stmt = ir.PrimitiveFunctionStatement()
 
         self.stmt.primitive_type = p.PRIMITIVES
         self.stmt.primitive_args = p.valueargs
-        self.stmt.primitive_bb_goto = p.goto_cond_block
+        self.stmt.primitive_bb_goto = p.goto_cond_block if p.goto_cond_block else None
         self.add_curr_stmt_and_reset()
+
+    @_('function_call')
+    def stmttype(self, p):
+        print('stmttype function_call', p.function_call)
+        return p.function_call
 
     # todo: function
     """              |-| method call on Struct
@@ -343,6 +350,11 @@ class MirParser(Parser):
     # issue is recognising all:
     #   Type::<Type, Type>::method(args)
     #   Type::<Type, Type>::method::<Type, Type>(args) fixme
+    # these due to:
+    # <HashMap<u32, String> as Index<&u32>>::index(move _2, move _3) -> bb69
+    # <String as From<&str>>::from(const "init") -> bb69
+
+    # todo; update grammar to reflect impl, and get rid of 7 shift/reduce conflicts
     # function_call -> generic COLONTWICE method_call ( valueargs ) goto_block
     # method_call -> METHODNAME | METHODNAME turbofish
     # turbofish -> COLONTWICE "<" typeargs ">"
@@ -355,62 +367,112 @@ class MirParser(Parser):
     # typeargs -> typearg "," typeargs | typearg
     # typearg -> TYPENAMES | REF TYPENAMES | REFMUT TYPENAMES
 
-    # <HashMap<u32, String> as Index<&u32>>::index(move _2, move _3) -> bb69
-    # <String as From<&str>>::from(const "init") -> bb69
-
-
-
-
-    @_('function_call')
-    def stmttype(self, p):
-        print('stmttype function_call', p.function_call)
-        return p.function_call
-
-    # function_call -> turbofish COLONTWICE methodcall ( valueargs ) goto_block | TYPENAMES COLONTWICE ( valueargs ) goto_cond_block
-    # FIXME: maybe secondary production is not required, goto_cond_block only appears in primitives
-    #   NOTE: turbofish also called FQTS (Fully Qualified Trait Syntax)
-    @_('turbofish COLONTWICE methodcall "(" valueargs ")" goto_block')
+    @_(
+        'generic COLONTWICE method_call "(" valueargs ")" goto_block',
+        'generic COLONTWICE method_call "(" valueargs ")"',
+    )
     def function_call(self, p):
-        print('function_call', p.methodcall)
-        self.stmt = ir.FunctionStatement()
-        self.stmt.function_type = p.turbofish
-        self.stmt.function_method = p.methodcall
+        print('function_call', p.generic, p.method_call, p.valueargs, p.goto_block if p.goto_block else '')
+        self.stmt: ir.FunctionStatement = ir.FunctionStatement()
+        self.stmt.function_type = p.generic
+        self.stmt.function_method = p.method_call
         self.stmt.function_args = p.valueargs
-        self.stmt.function_bb_goto = p.goto_block
+        self.stmt.function_bb_goto = p.goto_block if p.goto_block else None
+        self.add_curr_stmt_and_reset()
+        return ir.FunctionStatement
 
-    @_('TYPENAMES COLONTWICE "(" valueargs ")" goto_cond_block')
+    # HACK: primitive MIR-builtins can assign, but are functions
+    @_('TYPENAMES "(" valueargs ")"')
     def function_call(self, p):
-        print('function_call', p.TYPENAMES)
-        # todo create stmt for function call with goto_cond_block
-        self.stmt.stmt_type = ir.StatementType.FUNCTION_CALL
+        print('function_call', p.TYPENAMES, p.valueargs)
+        self.stmt: ir.PrimitiveFunctionStatement = ir.PrimitiveFunctionStatement()
+        self.stmt.primitive_type = p.TYPENAMES
+        self.stmt.function_args = p.valueargs
+        self.add_curr_stmt_and_reset()
+        return ir.PrimitiveFunctionStatement
 
-    # turbofish -> TYPENAMES COLONTWICE < typeargs >
-    @_('TYPENAMES COLONTWICE "<" typeargs ">"')
-    def turbofish(self, p):
-        print('turbofish', p.TYPENAMES)
-        return p.TYPENAMES, [p.typeargs]
+    @_('generic COLONTWICE "<" typeargs ">" cast')
+    def generic(self, p):
+        print('generic', p.generic, p.typeargs)
+        return p.generic, p.typeargs, p.cast if p.cast else None
 
-    # typeargs -> TYPENAMES "," typeargs | TYPENAMES
-    @_('typeargs "," TYPENAMES')
-    def typeargs(self, p):
-        print('typeargs', p.typeargs, p.TYPENAMES)
-        return p.typeargs + [p.TYPENAMES]
+    @_('TYPENAMES "<" typeargs ">" cast')
+    def generic(self, p):
+        print('generic', p.TYPENAMES, p.typeargs)
+        return p.TYPENAMES, p.typeargs, p.cast if p.cast else None
 
     @_('TYPENAMES')
-    def typeargs(self, p):
-        print('typearg', p.TYPENAMES)
-        return [p.TYPENAMES]
+    def generic(self, p):
+        print('generic', p.TYPENAMES)
+        return p.TYPENAMES, None, None
 
-    # methodcall -> METHODNAMES | METHODNAMES COLONTWICE < typeargs > // b/c ::get::<u32>
+    @_('generic cast')
+    def generic(self, p):
+        print('generic', p.generic)
+        return p.generic, None, p.cast if p.cast else None
+
+    @_('"<" generic ">"')
+    def generic(self, p):
+        print('generic', p.generic)
+        return p.generic, None, None
+
+    @_('AS TYPENAMES "<" typeargs ">"')
+    def cast(self, p):
+        print('cast', p.TYPENAMES, p.typeargs)
+        return p.TYPENAMES, p.typeargs
+
+    @_('')
+    def empty(self, p):
+        pass
+
+    @_('empty')
+    def cast(self, p):
+        pass
+
+    # method_call -> METHODNAME | METHODNAME turbofish
     @_('METHODNAMES')
-    def methodcall(self, p):
-        print('methodcall', p.METHODNAMES)
+    def method_call(self, p):
+        print('method_call', p.METHODNAMES)
         return p.METHODNAMES
 
-    @_('METHODNAMES COLONTWICE "<" typeargs ">"')
-    def methodcall(self, p):
-        print('methodcall', p.METHODNAMES)
-        return p.METHODNAMES
+    @_('METHODNAMES turbofish')
+    def method_call(self, p):
+        print('method_call', p.METHODNAMES, p.turbofish)
+        return p.METHODNAMES, p.turbofish
+
+    # turbofish -> COLONTWICE "<" typeargs ">"
+    @_('COLONTWICE "<" typeargs ">"')
+    def turbofish(self, p):
+        print('turbofish', p.typeargs)
+        return p.typeargs
+
+    # typeargs -> typearg "," typeargs | typearg
+    # typearg -> TYPENAMES | REF TYPENAMES | REFMUT TYPENAMES
+
+    @_('typearg "," typeargs')
+    def typeargs(self, p):
+        print('typeargs', p.typearg, p.typeargs)
+        return [p.typearg] + p.typeargs
+
+    @_('typearg')
+    def typeargs(self, p):
+        print('typeargs', p.typearg)
+        return [p.typearg]
+
+    @_('TYPENAMES')
+    def typearg(self, p):
+        print('typearg', p.TYPENAMES)
+        return p.TYPENAMES
+
+    @_('REF TYPENAMES')
+    def typearg(self, p):
+        print('typearg', p.TYPENAMES)
+        return p.REF + p.TYPENAMES
+
+    @_('REFMUT TYPENAMES')
+    def typearg(self, p):
+        print('typearg', p.TYPENAMES)
+        return p.REFMUT + p.TYPENAMES
 
     # valueargs -> valueargs "," valuearg | valuearg
     @_('valueargs "," valuearg')
@@ -488,7 +550,6 @@ class MirParser(Parser):
         return p.BB
 
 
-
 def parse(mir_program):
     mir_lexer = MirLexer()
     mir_parser = MirParser()
@@ -516,7 +577,6 @@ if __name__ == '__main__':
     print(f"{header}\nparsing: ")
     res = parse(text)
     print(f"{header}\nparsing result: ")
-    # lpprint(res)
 
     print(f"{header}\ncfg pprint: ")
-    cfg.pprint()
+    res.pprint()
