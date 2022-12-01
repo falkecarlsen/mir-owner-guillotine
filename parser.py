@@ -129,7 +129,7 @@ class MirLexer(Lexer):
 class MirParser(Parser):
     tokens = MirLexer.tokens
     debugfile = 'parser.out'
-    start = 'block'
+    start = 'bblist'
 
     def __init__(self):
         self.curr_bb_id: int = -1
@@ -164,6 +164,15 @@ class MirParser(Parser):
         self.types[p.LOCATION] = p.TYPENAMES
         return p.LOCATION
 
+    # bblist -> bblist block | block
+    @_('block')
+    def bblist(self, p):
+        return p.block
+
+    @_('bblist block')
+    def bblist(self, p):
+        return p.block # FIXME, is correct concat and order of CFG?
+
     # block
     @_('BB ":" "{" stmtlist "}"')
     def block(self, p):
@@ -184,18 +193,6 @@ class MirParser(Parser):
         self.temp_stmts.clear()
         return self.cfg
 
-    @_('')
-    def block_start(self, _p):
-        print("block start")
-
-    # bblist
-    @_('block bblist')
-    def bblist(self, p):
-        return p.block + p.bblist
-
-    @_('')
-    def bblist(self, _p):
-        return []
 
     # stmtlist -> stmtlist statement | statement
     @_('stmtlist statement')
@@ -556,7 +553,7 @@ if __name__ == '__main__':
     unbold = '\033[0m'
     header = "=" * 80
 
-    text = open('mir-source/expect-pass/functions.mir', 'r').read()
+    text = open('mir-source/expect-pass/multiple-bbs.mir', 'r').read()
 
     print(f"{header}\nlexing: ")
     mir_lexer = MirLexer()
