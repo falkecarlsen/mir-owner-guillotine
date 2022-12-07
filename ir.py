@@ -83,6 +83,15 @@ class Statement:
     rhs_location: Optional[int] = None
     rhs_op: Optional[str] = None
     rhs_value: Optional[Any] = None
+    # liveness analysis variables
+    # in[i] = gen[i] U (out[i] \ kill[i])
+    live_in: Set[int] = field(default_factory=set)
+    # out[i] = U in[j] where j is successor of i
+    live_out: Set[int] = field(default_factory=set)
+    # gen[i] = {x | x is used in Statement() i}
+    gen: Set[int] = field(default_factory=set)
+    # kill[i] = {x | x is defined in Statement() i}
+    kill: Set[int] = field(default_factory=set)
 
     def __repr__(self):
         return (
@@ -104,6 +113,7 @@ class Mode(Enum):
 
     NONE = auto()
     MOVE = auto()
+    NOT_MOVE = auto()
     COPY = auto()
 
 
@@ -138,7 +148,7 @@ class FunctionStatement(Statement):
     function_method: Optional[str] = None
     function_type: Optional[str] = None
     function_args: Optional[List[FunctionArg]] = field(default_factory=list)
-    function_bb_goto: Optional[int] = None
+    bb_goto: Optional[int] = None
 
     def __repr__(self):
         return (
@@ -146,7 +156,7 @@ class FunctionStatement(Statement):
             f"\t\tfunction_method={self.function_method},\n"
             f"\t\tfunction_type={self.function_type}, \n"
             f"\t\tfunction_args={self.function_args}, \n"
-            f"\t\tfunction_bb_goto={self.function_bb_goto}, \n"
+            f"\t\tbb_goto={self.bb_goto}, \n"
         )
 
 
@@ -158,7 +168,7 @@ class PrimitiveFunctionStatement(Statement):
 
     primitive_type: str = None
     primitive_args: Optional[List[FunctionArg]] = field(default_factory=list)
-    primitive_bb_goto: Optional[List[int]] = None
+    bb_goto: Optional[List[int]] = None
 
     # repr
     def __repr__(self):
@@ -166,7 +176,7 @@ class PrimitiveFunctionStatement(Statement):
             f"\tPrimitiveFunctionStatement(\n"
             f"\t\tprimitive_type={self.primitive_type},\n"
             f"\t\tprimitive_args=\n{self.primitive_args}, \n"
-            f"\t\tprimitive_bb_goto={self.primitive_bb_goto}\n"
+            f"\t\tbb_goto={self.bb_goto}\n"
         )
 
 
@@ -174,8 +184,8 @@ class PrimitiveFunctionStatement(Statement):
 class BasicBlock:
     name: int
     stmts: List[Statement] = field(default_factory=list)
-    succ: Set['BasicBlock'] = field(default_factory=set)
-    pred: Set['BasicBlock'] = field(default_factory=set)
+    succ: Set[int] = field(default_factory=set)
+    pred: Set[int] = field(default_factory=set)
     livein: Set = field(default_factory=set)
     liveout: Set = field(default_factory=set)
     defs: List = field(default_factory=list)
@@ -214,88 +224,119 @@ class CFG:
     types: Dict[int, str] = {}
 
     def __init__(self):
-        self.bbs = []
-        self.locations = []
-        self.types = {}
+        self.bbs: List[BasicBlock] = []
+        # edges as list of tuples (idx of pred, succ)
+        self.edges: List[Tuple[int, int]] = []
 
-    def __repr__(self):
-        return f"CFG(bbs={self.bbs},\n locations={self.locations},\n types={self.types})"
+    def add_edge(self, pred: int, succ: List[int]):
+        # if only one succ, add it
+        if isinstance(succ, int):
+            if pred > succ:
+                pred, succ = succ, pred
+            self.edges.append((pred, succ))
+            # give blocks pred and succ
+            self.bbs[pred].succ.add(succ)
+        else:
+            # for each succ, add them to set of bb succs
+            for s in succ:
+                self.edges.append((pred, s))
+                # give blocks pred and succ
+                self.bbs[pred].succ.add(s)
 
-    def index_of(self, node: BasicBlock):
+    def fill_in_pred_bb(self):
+        for bb in self.bbs:
+            for succ_index in bb.succ:
+                self.bbs[succ_index].pred.add(self.index_of(bb))
+
+    def index_of(self, node: BasicBlock) -> int:
         return self.bbs.index(node)
-
-    def add_stmt_bb(self, bb_id: int, stmt: Statement):
-        self.bbs[bb_id].stmts.append(stmt)
 
     def add_bb(self, node: BasicBlock):
         self.bbs.append(node)
         # sort bbs by name (int)
         self.bbs.sort(key=lambda x: x.name)
 
-    def add_edge(self, fro: BasicBlock, to: BasicBlock):
-        # set succ of fro to to
-        self.bbs[self.index_of(fro)].succ.append(self.index_of(to))
-        # set pred of to to fro
-        self.bbs[self.index_of(to)].pred.append(self.index_of(fro))
+    def __repr__(self):
+        return f"CFG(bbs={self.bbs},\n locations={self.locations},\n types={self.types})"
 
     def pprint(self):
         for n in self.bbs:
             print(f"BB {n.name}:\n\tSucc: {n.succ}\n\tPred: {n.pred}\n\tStmts (num: {len(n.stmts)}: {n.stmts}")
+        print(f"CFG edges: {self.edges}")
+        # print succs and preds for each bb
+        for bb in self.bbs:
+            print(f"BB {bb.name}:\n\tSucc: {bb.succ}\n\tPred: {bb.pred}")
 
 
 class CFGUDChain(CFG):
     """
-    CFG data structure with Use-Define chain computation
-    """
+    Use-Define chain computation on CFG class. Dataflow analysis.
+    Will need Reaching Definitions analysis to be done first. We only have unambiguous definitions in MIR (correct?)
+        Reaching Definitions pseudocode:
+        variables:
+            IN is a set of definitions that reach the current statement
+            OUT is a set of definitions that are reachable from the current statement
+            GEN is a set of definitions that are generated by the current statement
+            KILL is a set of definitions that are killed by the current statement
+        algorithm:
+            IN[entry] = {}
+            OUT[entry] = {}
+            for each node n in CFG:
+                IN[n] = {}
+                OUT[n] = {}
+            while True:
+                change = False
+                for each node n in CFG:
+                    IN[n] = U OUT[p] for each p in pred[n]
+                    OUT[n] = gen[n] U (IN[n] - kill[n])
+                    if IN[n] != old_IN[n] or OUT[n] != old_OUT[n]:
+                        change = True
+                if not change:
+                    break
 
-    # list of UD chains
-    ud_chains = []
+        Using previously computed Reaching Definitions, compute Use-Define chains:
+
+
+
+
+    """
 
     def __init__(self):
         super().__init__()
 
-    def compute_ud_chains(self):
-        # compute UD chains
-        for n in self.bb:
-            # compute defs
-            n.defs = [i for i in n.instr if i[0] == 'def']
-            # compute uses
-            n.uses = [i for i in n.instr if i[0] == 'use']
-            # compute gen
-            n.gen = [i for i in n.instr if i[0] == 'gen']
-            # compute livein
-            n.livein = [i for i in n.instr if i[0] == 'livein']
-            # compute liveout
-            n.liveout = [i for i in n.instr if i[0] == 'liveout']
+    def __repr__(self):
+        return f"CFGUDChain(bbs={self.bbs},\n locations={self.locations},\n types={self.types})"
 
-        # compute UD chains
-        for n in self.bb:
-            for u in n.uses:
-                # find def
-                for d in n.defs:
-                    if u[1] == d[1]:
-                        self.ud_chains.append((u, d))
-                        break
-                # find gen
-                for g in n.gen:
-                    if u[1] == g[1]:
-                        self.ud_chains.append((u, g))
-                        break
-                # find livein
-                for l in n.livein:
-                    if u[1] == l[1]:
-                        self.ud_chains.append((u, l))
-                        break
-                # find liveout
-                for l in n.liveout:
-                    if u[1] == l[1]:
-                        self.ud_chains.append((u, l))
-                        break
+    def compute_reaching_defs(self):
+        """
+        Compute reaching definitions for each statement in each BB, then compute livein and liveout for each BB
+        """
+        # compute reaching definitions for each stmt in each bb
+        for bb in self.bbs:
+            # init reaching definitions to empty set
+            bb.reaching_defs = [set() for _ in range(len(bb.stmts))]
+            # compute reaching definitions for each stmt in bb
+            for i in range(len(bb.stmts)):
+                # init reaching definitions for stmt i to empty set
+                bb.reaching_defs[i] = set()
+                # add reaching definitions of all preds of bb to stmt i reaching definitions
+                for pred in bb.pred:
+                    bb.reaching_defs[i] = bb.reaching_defs[i].union(self.bbs[pred].reaching_defs[-1])
+                # remove reaching definitions of stmt i from reaching definitions of stmt i
+                bb.reaching_defs[i] = bb.reaching_defs[i].difference(bb.stmts[i].locations)
+                # add reaching definitions of stmt i to reaching definitions of stmt i
+                bb.reaching_defs[i] = bb.reaching_defs[i].union(bb.stmts[i].locations)
+        # compute livein and liveout for each bb
+        for bb in self.bbs:
+            # init livein and liveout to empty set
+            bb.livein = set()
+            bb.liveout = set()
+            # compute liveout for each bb
+            for succ in bb.succ:
+                bb.liveout = bb.liveout.union(self.bbs[succ].livein)
+            # compute livein for each bb
+            bb.livein = bb.liveout.difference(bb.defs).union(bb.uses)
 
-    def pprint(self):
-        super().pprint()
-        for c in self.ud_chains:
-            print(f"UD chain: {c}")
 
 
 if __name__ == '__main__':
