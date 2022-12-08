@@ -11,13 +11,9 @@
 //        debug y => _2;                   // in scope 1 at src/lib.rs:2:9: 2:14
 //    }
 
-    // fake bb00 as init for param, no worry that it's assigned and not abstract, as we don't do control flow analysis
+    // fake init for param, no worry that it's assigned and not abstract, as we don't do control flow analysis
     bb0: {
         _1 = const 42_i32;
-        goto -> bb0;
-    }
-
-    bb0: {
         _2 = const 42_i32;               // scope 0 at src/lib.rs:2:22: 2:24
         _3 = _1;                         // scope 1 at src/lib.rs:3:9: 3:10
         switchInt(move _3) -> [0_i32: bb1, otherwise: bb3]; // scope 1 at src/lib.rs:3:8: 3:16

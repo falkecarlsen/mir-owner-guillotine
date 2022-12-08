@@ -151,7 +151,7 @@ class MirParser(Parser):
 
     def __init__(self):
         self.curr_bb_id: int = -1
-        self.cfg: ir.CFG = ir.CFG()
+        self.cfg: ir.CFG = ir.CFGUDChain()
         self.temp_stmts: List[ir.Statement] = []
         self.stmt: ir.Statement = ir.Statement()
 
@@ -252,9 +252,9 @@ class MirParser(Parser):
         curr_stmt_id = self.get_loc_or_bb_int(p.LOCATION)
         last_stmt = self.stmt
         # if stmttype is function or primitive, just return p.stmttype
-        stmttype = p.stmttype
-        if stmttype is ir.FunctionStatement or stmttype is ir.PrimitiveFunctionStatement:
-            return stmttype
+        #stmttype = p.stmttype
+        #if stmttype is ir.FunctionStatement or stmttype is ir.PrimitiveFunctionStatement:
+        #    return stmttype
         # if last stmt is an assignment, then we need to assign the curr_stmt_id
         # fixme, not needed?
         match last_stmt.stmt_type:
@@ -442,7 +442,9 @@ class MirParser(Parser):
         print('function_call', p.TYPENAMES, p.valueargs)
         self.stmt: ir.PrimitiveFunctionStatement = ir.PrimitiveFunctionStatement()
         self.stmt.primitive_type = p.TYPENAMES
-        self.stmt.function_args = p.valueargs
+        self.stmt.primitive_args = p.valueargs
+        # assert stmt is ir.PrimitiveFunctionStatement
+        assert isinstance(self.stmt, ir.PrimitiveFunctionStatement)
         self.add_curr_stmt_and_reset()
         return ir.PrimitiveFunctionStatement
 
@@ -532,8 +534,17 @@ class MirParser(Parser):
     # valueargs -> valueargs "," valuearg | valuearg
     @_('valueargs "," valuearg')
     def valueargs(self, p):
-        print('valueargs', p.valuearg)
-        return [p.valueargs] + [p.valuearg]
+        print('valueargs', p.valueargs, p.valuearg)
+        # if either p.valueargs or p.valuearg is a list, then we need to flatten
+        if isinstance(p.valueargs, list) and isinstance(p.valuearg, list):
+            return p.valueargs + p.valuearg
+        elif isinstance(p.valueargs, list):
+            return p.valueargs + [p.valuearg]
+        elif isinstance(p.valuearg, list):
+            return [p.valueargs] + p.valuearg
+        else:
+            return [p.valueargs, p.valuearg]
+
 
     @_('valuearg')
     def valueargs(self, p):
@@ -545,36 +556,36 @@ class MirParser(Parser):
     @_('LOCATION')
     def valuearg(self, p):
         print('valuearg loc', p.LOCATION)
-        return ir.FunctionArg(location=p.LOCATION)
+        return ir.FunctionArg(location=self.get_loc_or_bb_int(p.LOCATION))
 
     @_('mode LOCATION')
     def valuearg(self, p):
         print('valuearg move loc', p.LOCATION)
-        return ir.FunctionArg(mode=p.mode, location=p.LOCATION)
+        return [ir.FunctionArg(mode=p.mode, location=self.get_loc_or_bb_int(p.LOCATION))]
 
     @_('constant')
     def valuearg(self, p):
         print('valuearg constant', p.constant)
         # p.constant[0] = number, p.constant[1] = type
-        return ir.FunctionArg(constant=(p.constant[0], p.constant[1]))
+        return [ir.FunctionArg(constant=(p.constant[0], p.constant[1]))]
 
     @_('CONST STRING', 'STRING')
     def valuearg(self, p):
         print('valuearg', p.STRING)
         # from method(const "init"), must be String due to typing of function call
-        return ir.FunctionArg(constant=(p.STRING, "String"))
+        return [ir.FunctionArg(constant=(p.STRING, "String"))]
 
     # assert valuearg dot accessing with type weirdness
     #           | mode "(" LOCATION "." NUMBER ":" TYPENAMES ")"
     @_('mode "(" LOCATION "." NUMBER ":" TYPENAMES ")"')
     def valuearg(self, p):
         print('valuearg', p.LOCATION, p.NUMBER, p.TYPENAMES)
-        return ir.FunctionArg(mode=ir.Mode.NOT_MOVE, location=p.LOCATION, type=p.TYPENAMES)
+        return [ir.FunctionArg(mode=ir.Mode.NOT_MOVE, location=self.get_loc_or_bb_int(p.LOCATION), type=p.TYPENAMES)]
 
     @_('LOCATION "." NUMBER : TYPENAMES')
     def valuearg(self, p):
         print('valuearg', p.LOCATION, p.NUMBER, p.TYPENAMES)
-        return ir.FunctionArg(location=p.LOCATION, type=p.TYPENAMES)
+        return [ir.FunctionArg(location=self.get_loc_or_bb_int(p.LOCATION), type=p.TYPENAMES)]
 
     @_('MODE')
     def mode(self, p):
@@ -654,9 +665,13 @@ if __name__ == '__main__':
         )
 
     print(f"{header}\nparsing: ")
-    res = parse(text)
+    res: ir.CFGUDChain = parse(text)
     res.fill_in_pred_bb()
     print(f"{header}\nparsing result: ")
 
     print(f"{header}\ncfg pprint: ")
     res.pprint() if res else None
+    res.fill_in_pred_bb()
+    res.finalise_cfg()
+    res.compute_reaching_definitions()
+    print("fuck")
