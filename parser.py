@@ -102,20 +102,24 @@ class MirLexer(Lexer):
             r'isize',
             r'bool',
             r'char',
-            r'str',
             r'string',
             r'String',
+            r'str',
             r'Some',
             r'HashMap',
             r'Index',
             r'From',
             r'discriminant',
             r'CheckedAdd',
+            r'CheckedSub',
+            r'CheckedMul',
+            r'CheckedDiv',
+            r'std'
         ]
     )
 
     METHODNAMES = r'|'.join(["index", "insert", "from", "get"])
-    PRIMITIVES = r'|'.join(["switchInt"])
+    PRIMITIVES = r'|'.join(["switchInt", "drop"])
     ASSERT = r'assert'
     CONST = r'const'
     MODE = r'|'.join(["move", "!move"])
@@ -224,8 +228,8 @@ class MirParser(Parser):
         if len(self.temp_stmts) > 0:
             last_stmt = self.temp_stmts[-1]
             if (
-                isinstance(last_stmt, (ir.FunctionStatement, ir.PrimitiveFunctionStatement))
-                and last_stmt.bb_goto is not None
+                    isinstance(last_stmt, (ir.FunctionStatement, ir.PrimitiveFunctionStatement))
+                    and last_stmt.bb_goto is not None
             ):
                 self.cfg.add_edge(self.curr_bb_id, last_stmt.bb_goto)
 
@@ -251,22 +255,18 @@ class MirParser(Parser):
     def statement(self, p):
         curr_stmt_id = self.get_loc_or_bb_int(p.LOCATION)
         last_stmt = self.stmt
-        # if stmttype is function or primitive, just return p.stmttype
-        #stmttype = p.stmttype
-        #if stmttype is ir.FunctionStatement or stmttype is ir.PrimitiveFunctionStatement:
-        #    return stmttype
+
         # if last stmt is an assignment, then we need to assign the curr_stmt_id
-        # fixme, not needed?
         match last_stmt.stmt_type:
             # do location assignment
-            case ir.StatementType.ASSIGN | ir.StatementType.FUNCTION_CALL:
+            case ir.StatementType.ASSIGN | ir.StatementType.FUNCTION_CALL | ir.StatementType.PRIMITIVE:
                 # check location is not in set of seen locations of temp_stmts for current bb
                 seen = [n.lhs_location for n in self.temp_stmts]
                 if curr_stmt_id in seen:
                     print(f'ERROR: curr_stmt_id {curr_stmt_id} already used')
                     exit(1)
                 else:
-                    last_stmt.lhs_location = curr_stmt_id
+                    self.stmt.lhs_location = curr_stmt_id
                     print(f"set lhs_location of last_stmt to {curr_stmt_id}")
             case ir.StatementType.UNREACHABLE | ir.StatementType.RETURN:
                 pass
@@ -359,15 +359,39 @@ class MirParser(Parser):
         self.stmt.rhs_location = self.get_loc_or_bb_int(p.LOCATION)
         return p.LOCATION
 
+    # result type unwrap
+    @_('"(" "(" LOCATION AS TYPENAMES ")" "." NUMBER ":" REF TYPENAMES COLONTWICE TYPENAMES COLONTWICE TYPENAMES ")"')
+    def stmttype(self, p):
+        print('stmttype unwrap', p.LOCATION, p.NUMBER, p.TYPENAMES1)
+        self.stmt.stmt_type = ir.StatementType.ASSIGN
+        self.stmt.rhs_location = self.get_loc_or_bb_int(p.LOCATION)
+        self.stmt.value_type = ir.ValueType.UNWRAP
+        self.stmt.unwrap_index = p.NUMBER
+        self.stmt.unwrap_type = p.TYPENAMES1
+        return p.TYPENAMES1
+
     # primitives
     @_('PRIMITIVES "(" valueargs ")" goto_cond_block ";"')
     def statement(self, p):
-        print('stmt primitive', p.PRIMITIVES, p.valueargs, p.goto_cond_block if p.goto_cond_block else '')
+        print('stmt primitive goto_cond', p.PRIMITIVES, p.valueargs, p.goto_cond_block if p.goto_cond_block else '')
         self.stmt = ir.PrimitiveFunctionStatement()
 
         self.stmt.primitive_type = p.PRIMITIVES
-        self.stmt.primitive_args = p.valueargs
+        # DEBUG: assert p.valueargs is of type list
+        assert isinstance(p.valueargs, list)
+        self.stmt.primitive_args.append(p.valueargs)
         self.stmt.bb_goto = p.goto_cond_block if p.goto_cond_block else None
+        self.add_curr_stmt_and_reset()
+
+    @_('PRIMITIVES "(" valueargs ")" goto_block ";"')
+    def statement(self, p):
+        print('stmt primitive goto_block', p.PRIMITIVES, p.valueargs, p.goto_block if p.goto_block else '')
+        self.stmt = ir.PrimitiveFunctionStatement()
+        # DEBUG: assert p.valueargs is of type list
+        assert isinstance(p.valueargs, list)
+        self.stmt.primitive_type = p.PRIMITIVES
+        self.stmt.primitive_args = p.valueargs
+        self.stmt.bb_goto = p.goto_block if p.goto_block else None
         self.add_curr_stmt_and_reset()
 
     # assert
@@ -383,7 +407,6 @@ class MirParser(Parser):
 
     @_('function_call')
     def stmttype(self, p):
-        print('stmttype function_call', p.function_call)
         return p.function_call
 
     # move -> MOVE "(" valueargs ")"
@@ -394,7 +417,6 @@ class MirParser(Parser):
 
         self.stmt.primitive_type = p.mode
         self.stmt.primitive_args = p.valueargs
-        self.add_curr_stmt_and_reset()
 
     # todo: function
     """              |-| method call on Struct
@@ -422,6 +444,16 @@ class MirParser(Parser):
     # typeargs -> typearg "," typeargs | typearg
     # typearg -> TYPENAMES | REF TYPENAMES | REFMUT TYPENAMES
 
+    # HACK: primitive MIR-builtins can assign, but are functions
+    @_('TYPENAMES "(" valueargs ")"')
+    def function_call(self, p):
+        print('function_call', p.TYPENAMES, p.valueargs)
+        self.stmt: ir.PrimitiveFunctionStatement = ir.PrimitiveFunctionStatement()
+        self.stmt.stmt_type = ir.StatementType.ASSIGN
+        self.stmt.primitive_type = p.TYPENAMES
+        self.stmt.primitive_args = p.valueargs
+        return ir.StatementType.PRIMITIVE
+
     @_(
         'generic COLONTWICE method_call "(" valueargs ")" goto_block',
         'generic COLONTWICE method_call "(" valueargs ")"',
@@ -429,24 +461,12 @@ class MirParser(Parser):
     def function_call(self, p):
         print('function_call', p.generic, p.method_call, p.valueargs, p.goto_block if p.goto_block else '')
         self.stmt: ir.FunctionStatement = ir.FunctionStatement()
+        self.stmt.stmt_type = ir.StatementType.ASSIGN
         self.stmt.function_type = p.generic
         self.stmt.function_method = p.method_call
         self.stmt.function_args = p.valueargs
         self.stmt.bb_goto = p.goto_block if p.goto_block else None
-        self.add_curr_stmt_and_reset()
-        return ir.FunctionStatement
-
-    # HACK: primitive MIR-builtins can assign, but are functions
-    @_('TYPENAMES "(" valueargs ")"')
-    def function_call(self, p):
-        print('function_call', p.TYPENAMES, p.valueargs)
-        self.stmt: ir.PrimitiveFunctionStatement = ir.PrimitiveFunctionStatement()
-        self.stmt.primitive_type = p.TYPENAMES
-        self.stmt.primitive_args = p.valueargs
-        # assert stmt is ir.PrimitiveFunctionStatement
-        assert isinstance(self.stmt, ir.PrimitiveFunctionStatement)
-        self.add_curr_stmt_and_reset()
-        return ir.PrimitiveFunctionStatement
+        return ir.StatementType.FUNCTION_CALL
 
     @_('generic COLONTWICE "<" typeargs ">" cast')
     def generic(self, p):
@@ -545,11 +565,10 @@ class MirParser(Parser):
         else:
             return [p.valueargs, p.valuearg]
 
-
     @_('valuearg')
     def valueargs(self, p):
         print('valuearg', p.valuearg)
-        return p.valuearg
+        return [p.valuearg]
 
     # valuearg -> LOCATION | MOVE LOCATION | valuearg_constant (reuse from stmt) | CONST STRING | STRING
     #           | mode "(" LOCATION "." NUMBER ":" TYPENAMES ")"
@@ -560,41 +579,41 @@ class MirParser(Parser):
 
     @_('mode LOCATION')
     def valuearg(self, p):
-        print('valuearg move loc', p.LOCATION)
-        return [ir.FunctionArg(mode=p.mode, location=self.get_loc_or_bb_int(p.LOCATION))]
+        print('valuearg move loc', p.LOCATION, p.mode)
+        return ir.FunctionArg(mode=p.mode, location=self.get_loc_or_bb_int(p.LOCATION))
 
     @_('constant')
     def valuearg(self, p):
         print('valuearg constant', p.constant)
         # p.constant[0] = number, p.constant[1] = type
-        return [ir.FunctionArg(constant=(p.constant[0], p.constant[1]))]
+        return ir.FunctionArg(constant=(p.constant[0], p.constant[1]))
 
     @_('CONST STRING', 'STRING')
     def valuearg(self, p):
         print('valuearg', p.STRING)
         # from method(const "init"), must be String due to typing of function call
-        return [ir.FunctionArg(constant=(p.STRING, "String"))]
+        return ir.FunctionArg(constant=(p.STRING, "String"))
 
     # assert valuearg dot accessing with type weirdness
     #           | mode "(" LOCATION "." NUMBER ":" TYPENAMES ")"
     @_('mode "(" LOCATION "." NUMBER ":" TYPENAMES ")"')
     def valuearg(self, p):
         print('valuearg', p.LOCATION, p.NUMBER, p.TYPENAMES)
-        return [ir.FunctionArg(mode=ir.Mode.NOT_MOVE, location=self.get_loc_or_bb_int(p.LOCATION), type=p.TYPENAMES)]
+        return ir.FunctionArg(mode=ir.Mode.NOT_MOVE, location=self.get_loc_or_bb_int(p.LOCATION), type=p.TYPENAMES)
 
     @_('LOCATION "." NUMBER : TYPENAMES')
     def valuearg(self, p):
         print('valuearg', p.LOCATION, p.NUMBER, p.TYPENAMES)
-        return [ir.FunctionArg(location=self.get_loc_or_bb_int(p.LOCATION), type=p.TYPENAMES)]
+        return ir.FunctionArg(location=self.get_loc_or_bb_int(p.LOCATION), type=p.TYPENAMES)
 
     @_('MODE')
     def mode(self, p):
         print('mode', p.MODE)
         function_mode = ir.Mode.NONE
         match p.MODE:
-            case 'MOVE':
+            case 'move':
                 function_mode = ir.Mode.MOVE
-            case 'REF':
+            case 'ref':
                 function_mode = ir.MODE.NOT_MOVE
         return function_mode
 
@@ -650,8 +669,9 @@ if __name__ == '__main__':
     bold = '\033[1m'
     unbold = '\033[0m'
     header = "=" * 80
+    in_file = 'mir-source/expect-pass/get_or_insert.mir'
 
-    text = open('mir-source/expect-pass/cond-assign.mir', 'r').read()
+    text = open(in_file, 'r').read()
 
     print(f"{header}\nlexing: ")
     mir_lexer = MirLexer()
@@ -666,12 +686,18 @@ if __name__ == '__main__':
 
     print(f"{header}\nparsing: ")
     res: ir.CFGUDChain = parse(text)
-    res.fill_in_pred_bb()
     print(f"{header}\nparsing result: ")
 
     print(f"{header}\ncfg pprint: ")
-    res.pprint() if res else None
-    res.fill_in_pred_bb()
     res.finalise_cfg()
+    res.pprint() if res else None
     res.compute_reaching_definitions()
+    # read and print in_file to std out
+    print(f"{header}\nread and print in_file to std out: ")
+    print(open(in_file, 'r').read())
+    for bb in res.bbs:
+        print(f"{header}\nbb {bb.name} reaching definitions: ")
+        for i, stmt in enumerate(bb.stmts):
+            # print live in/ live out
+            print(f"\tstmt{i} live in: {stmt.live_in} live out: {stmt.live_out}")
     print("fuck")

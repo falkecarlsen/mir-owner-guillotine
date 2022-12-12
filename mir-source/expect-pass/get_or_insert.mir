@@ -1,0 +1,48 @@
+bb0: {
+    _3 = &(*_1);
+    _5 = const 42_u32;
+    _2 = HashMap::<u32, String>::get::<u32>(move _3, move _5) -> bb1;
+}
+
+bb1: {
+    _7 = discriminant(_2);
+    switchInt(move _7) -> [0_isize: bb2, 1_isize: bb4, otherwise: bb3];
+}
+
+bb2: {
+  _17 = &mut (*_1);
+  _18 = <String as From<&str>>::from(const "init") -> bb5;
+}
+
+bb5: {
+  _16 = HashMap::<u32, String>::insert(move _17, const 42_u32, move _18) -> bb6;
+}
+
+bb6: {
+  drop(_16) -> bb7;
+}
+
+bb7: {
+    _11 = &(*_1);
+    _12 = const 42_u32;
+    _10 = <HashMap<u32, String> as Index<&u32>>::index(move _11, move _12) -> bb8;
+}
+
+bb3: {
+    unreachable;
+}
+
+bb4: {
+    _8 = ((_2 as Some).0: &std::string::String);
+    _0 = _8;
+    goto -> bb9;
+}
+
+bb8: {
+    _0 = _10;
+    goto -> bb9;
+}
+
+bb9: {
+    return;
+}

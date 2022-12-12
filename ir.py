@@ -68,6 +68,7 @@ class ValueType(Enum):
     BORROW = auto()
     DEREF = auto()
     CALL = auto()
+    UNWRAP = auto()
 
 
 @dataclass(kw_only=True)
@@ -197,9 +198,17 @@ class PrimitiveFunctionStatement(Statement):
     primitive_args: Optional[List[FunctionArg]] = field(default_factory=list)
     bb_goto: Optional[List[int]] = None
 
+    def generates(self):
+        return set()
+
     def kills(self):
         kill_set = set()
         for arg in self.primitive_args:
+            # TODO: fix this, happens somewhere in valueargs, where arg is nested for some reason
+            # TODO: HACK: if arg is list, unwrap to one FunctionArg
+            if isinstance(arg, list):
+                arg = arg[0]
+
             if arg.location is not None:
                 if arg.mode in [Mode.MOVE, Mode.NONE]:
                     if arg.location:
@@ -254,15 +263,23 @@ class CFG:
 
     # list of BB nodes
     bbs: List[BasicBlock] = []
-    # list of locations in the CFG
-    locations = []
+    # list of BB edges
+    edges: List[Tuple[int, int]] = []
+    # entry and exit nodes, referring to bb ids
+    entry: int = None
+    exit: int = None
     # list of types of locations in the CFG k:v -> location:type
-    types: Dict[int, str] = {}
+    _types: Dict[int, str] = {}
 
-    def __init__(self):
-        self.bbs: List[BasicBlock] = []
-        # edges as list of tuples (idx of pred, succ)
-        self.edges: List[Tuple[int, int]] = []
+    def find_and_set_entry_exit(self):
+        """
+        Find entry and exit nodes in the CFG
+        """
+        for bb in self.bbs:
+            if not bb.pred:
+                self.entry = bb.name
+            if not bb.succ:
+                self.exit = bb.name
 
     def add_edge(self, pred: int, succ: List[int]):
         # if only one succ, add it
@@ -270,21 +287,30 @@ class CFG:
             if pred > succ:
                 pred, succ = succ, pred
             self.edges.append((pred, succ))
-            # give blocks pred and succ
-            self.bbs[pred].succ.add(succ)
         else:
             # for each succ, add them to set of bb succs
             for s in succ:
                 self.edges.append((pred, s))
-                # give blocks pred and succ
-                self.bbs[pred].succ.add(s)
 
-    def fill_in_pred_bb(self):
+    def fill_in_bb_pred_succ(self):
+        # for each bb, add pred and succ according to self.edges
+        for e in self.edges:
+            pred, succ = e
+            for bb in self.bbs:
+                if bb.name == pred:
+                    bb.succ.add(succ)
+                if bb.name == succ:
+                    bb.pred.add(pred)
+
+
         for bb in self.bbs:
             for succ_index in bb.succ:
-                self.bbs[succ_index].pred.add(self.index_of(bb))
+                pred = self.index_of(bb)
+                pass
+                # self.bbs[succ_index].pred.add(pred)
 
     def finalise_cfg(self):
+        self.fill_in_bb_pred_succ()
         # compute succ and pred for each stmt in each bb
         for bb in self.bbs:
             for i, stmt in enumerate(bb.stmts):
@@ -315,6 +341,9 @@ class CFG:
                 stmt.gen = stmt.generates()
                 stmt.kill = stmt.kills()
 
+        # set entry and exit nodes
+        self.find_and_set_entry_exit()
+
         # assert that all succ and preds in CFG are of the type Set[Tuple[Optional[int], int]]
         for bb in self.bbs:
             for stmt in bb.stmts:
@@ -337,7 +366,7 @@ class CFG:
         self.bbs.sort(key=lambda x: x.name)
 
     def __repr__(self):
-        return f"CFG(bbs={self.bbs},\n locations={self.locations},\n types={self.types})"
+        return f"CFG(bbs={self.bbs},\n locations={self.locations},\n types={self._types})"
 
     def pprint(self):
         for n in self.bbs:
@@ -346,6 +375,7 @@ class CFG:
         # print succs and preds for each bb
         for bb in self.bbs:
             print(f"BB {bb.name}:\n\tSucc: {bb.succ}\n\tPred: {bb.pred}")
+        print(f"CFG entry: {self.entry}, exit: {self.exit}")
 
 
 class CFGUDChain(CFG):
@@ -385,7 +415,7 @@ class CFGUDChain(CFG):
         super().__init__()
 
     def __repr__(self):
-        return f"CFGUDChain(bbs={self.bbs},\n locations={self.locations},\n types={self.types})"
+        return f"CFGUDChain(bbs={self.bbs},\n locations={self.locations},\n types={self._types})"
 
     def compute_reaching_definitions(self):
         """
@@ -403,7 +433,7 @@ class CFGUDChain(CFG):
                     # remember old IN and OUT to check change, stopping at fixed point (sup/inf?)
                     old_in = stmt.live_in
                     old_out = stmt.live_out
-                    # compute IN[n] = intersection OUT[p] for each p in pred[n]
+                    # compute IN[n] = union OUT[p] for each p in pred[n]
                     # check if we are not at start node, then compute IN
                     if not (b_i == 0 and s_i == 0):
                         if len(stmt.pred) == 1:
@@ -415,10 +445,10 @@ class CFGUDChain(CFG):
                             for (bb_index, stmt_index) in stmt.pred:
                                 # if bb_index is None, then within same bb
                                 if bb_index is None:
-                                    stmt.live_in = stmt.live_in.intersection(self.bbs[b_i].stmts[stmt_index].live_out)
+                                    stmt.live_in = stmt.live_in.union(self.bbs[b_i].stmts[stmt_index].live_out)
                                 else:
-                                    #FIXME 
-                                    stmt.live_in = stmt.live_in.intersection(self.bbs[bb_index].stmts[-1].live_out)
+                                    # FIXME
+                                    stmt.live_in = stmt.live_in.union(self.bbs[bb_index].stmts[-1].live_out)
 
                     # compute OUT[n] = gen[n] U (IN[n] - kill[n])
                     gen = stmt.gen

@@ -1,7 +1,10 @@
 bb0: {
+    _1 = const 42_i32;
+    _2 = _1;
     goto -> bb1;
 }
 
 bb1: {
+    _3 = _2;
     return;
 }
