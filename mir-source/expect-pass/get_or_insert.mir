@@ -10,16 +10,16 @@ bb1: {
 }
 
 bb2: {
-  _17 = &mut (*_1);
-  _18 = <String as From<&str>>::from(const "init") -> bb5;
+    _17 = &mut (*_1);
+    _18 = <String as From<&str>>::from(const "init") -> bb5;
 }
 
 bb5: {
-  _16 = HashMap::<u32, String>::insert(move _17, const 42_u32, move _18) -> bb6;
+    _16 = HashMap::<u32, String>::insert(move _17, const 42_u32, move _18) -> bb6;
 }
 
 bb6: {
-  drop(_16) -> bb7;
+    drop(_16) -> bb7;
 }
 
 bb7: {
