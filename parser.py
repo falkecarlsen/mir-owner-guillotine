@@ -1,4 +1,5 @@
 import re
+from pprint import pprint
 from typing import List
 
 from sly import Lexer, Parser
@@ -114,11 +115,11 @@ class MirLexer(Lexer):
             r'CheckedSub',
             r'CheckedMul',
             r'CheckedDiv',
-            r'std'
+            r'std',
         ]
     )
 
-    METHODNAMES = r'|'.join(["index", "insert", "from", "get"])
+    METHODNAMES = r'|'.join(["index", "insert", "from", "get", "new"])
     PRIMITIVES = r'|'.join(["switchInt", "drop"])
     ASSERT = r'assert'
     CONST = r'const'
@@ -199,6 +200,8 @@ class MirParser(Parser):
         return p.bblist
     """
 
+    # stmtlist -> stmtlist stmt | stmt
+
     # bblist -> bblist block | block
     @_('block')
     def bblist(self, p):
@@ -206,7 +209,7 @@ class MirParser(Parser):
 
     @_('bblist block')
     def bblist(self, p):
-        return p.block  # FIXME, is correct concat and order of CFG?
+        return p.bblist  # FIXME, is correct concat and order of CFG?
 
     # block
     @_('BB ":" "{" stmtlist "}"')
@@ -214,7 +217,7 @@ class MirParser(Parser):
         try:
             self.curr_bb_id = self.get_loc_or_bb_int(p.BB)
             # create BasicBlock and add to CFG
-            bb = ir.BasicBlock(self.curr_bb_id)
+            bb = ir.BasicBlock(name=self.curr_bb_id)
             # add temp statements to BasicBlock
             bb.add_statements(self.temp_stmts)
             self.cfg.add_bb(bb)
@@ -228,8 +231,8 @@ class MirParser(Parser):
         if len(self.temp_stmts) > 0:
             last_stmt = self.temp_stmts[-1]
             if (
-                    isinstance(last_stmt, (ir.FunctionStatement, ir.PrimitiveFunctionStatement))
-                    and last_stmt.bb_goto is not None
+                isinstance(last_stmt, (ir.FunctionStatement, ir.PrimitiveFunctionStatement))
+                and last_stmt.bb_goto is not None
             ):
                 self.cfg.add_edge(self.curr_bb_id, last_stmt.bb_goto)
 
@@ -359,7 +362,7 @@ class MirParser(Parser):
         self.stmt.rhs_location = self.get_loc_or_bb_int(p.LOCATION)
         return p.LOCATION
 
-    # result type unwrap
+    # result type unwrap hack
     @_('"(" "(" LOCATION AS TYPENAMES ")" "." NUMBER ":" REF TYPENAMES COLONTWICE TYPENAMES COLONTWICE TYPENAMES ")"')
     def stmttype(self, p):
         print('stmttype unwrap', p.LOCATION, p.NUMBER, p.TYPENAMES1)
@@ -454,10 +457,7 @@ class MirParser(Parser):
         self.stmt.primitive_args = p.valueargs
         return ir.StatementType.PRIMITIVE
 
-    @_(
-        'generic COLONTWICE method_call "(" valueargs ")" goto_block',
-        'generic COLONTWICE method_call "(" valueargs ")"',
-    )
+    @_('generic COLONTWICE method_call "(" valueargs ")" goto_block')
     def function_call(self, p):
         print('function_call', p.generic, p.method_call, p.valueargs, p.goto_block if p.goto_block else '')
         self.stmt: ir.FunctionStatement = ir.FunctionStatement()
@@ -466,6 +466,16 @@ class MirParser(Parser):
         self.stmt.function_method = p.method_call
         self.stmt.function_args = p.valueargs
         self.stmt.bb_goto = p.goto_block if p.goto_block else None
+        return ir.StatementType.FUNCTION_CALL
+
+    @_('generic COLONTWICE method_call "(" valueargs ")"')
+    def function_call(self, p):
+        print('function_call', p.generic, p.method_call, p.valueargs)
+        self.stmt: ir.FunctionStatement = ir.FunctionStatement()
+        self.stmt.stmt_type = ir.StatementType.ASSIGN
+        self.stmt.function_type = p.generic
+        self.stmt.function_method = p.method_call
+        self.stmt.function_args = p.valueargs
         return ir.StatementType.FUNCTION_CALL
 
     @_('generic COLONTWICE "<" typeargs ">" cast')
@@ -668,7 +678,7 @@ def parse(mir_program):
 if __name__ == '__main__':
     bold = '\033[1m'
     unbold = '\033[0m'
-    header = "=" * 80
+    header = "=" * 10
     in_file = 'mir-source/expect-pass/get_or_insert.mir'
 
     text = open(in_file, 'r').read()
@@ -695,9 +705,21 @@ if __name__ == '__main__':
     # read and print in_file to std out
     print(f"{header}\nread and print in_file to std out: ")
     print(open(in_file, 'r').read())
+
     for bb in res.bbs:
         print(f"{header}\nbb {bb.name} reaching definitions: ")
         for i, stmt in enumerate(bb.stmts):
-            # print live in/ live out
-            print(f"\tstmt{i} live in: {stmt.live_in} live out: {stmt.live_out}")
+            # print def in and def out
+            print(f"\tstmt:{i}")
+            print(f"\t\tdef in:")
+            pprint(stmt.def_in, width=20, indent=12)
+            print(f"\t\tdef out:")
+            pprint(stmt.def_out, width=20, indent=12)
+    exit(0)
+    res.compute_liveness()
+    for bb in res.bbs:
+        print(f"{header}\nbb {bb.name} liveness: ")
+        for i, stmt in enumerate(bb.stmts):
+            # print live in/live out
+            print(f"\tstmt:{i} live in: {stmt.live_in} \t live out: {stmt.live_out}")
     print("fuck")

@@ -1,4 +1,5 @@
 bb0: {
+    _1 = HashMap::new(const 42_u32);
     _3 = &(*_1);
     _5 = const 42_u32;
     _2 = HashMap::<u32, String>::get::<u32>(move _3, move _5) -> bb1;
