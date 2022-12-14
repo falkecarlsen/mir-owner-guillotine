@@ -217,10 +217,10 @@ class MirParser(Parser):
         try:
             self.curr_bb_id = self.get_loc_or_bb_int(p.BB)
             # create BasicBlock and add to CFG
-            bb = ir.BasicBlock(name=self.curr_bb_id)
+            block = ir.BasicBlock(name=self.curr_bb_id)
             # add temp statements to BasicBlock
-            bb.add_statements(self.temp_stmts)
-            self.cfg.add_bb(bb)
+            block.add_statements(self.temp_stmts)
+            self.cfg.add_bb(block)
 
         except ValueError:
             print('ERROR: Invalid BB id', p.BB)
@@ -669,10 +669,10 @@ class MirParser(Parser):
         return p.BB
 
 
-def parse(mir_program):
-    mir_lexer = MirLexer()
-    mir_parser = MirParser()
-    return mir_parser.parse(mir_lexer.tokenize(mir_program))
+def parse(program):
+    lexer = MirLexer()
+    parser = MirParser()
+    return parser.parse(lexer.tokenize(program))
 
 
 if __name__ == '__main__':
@@ -715,7 +715,7 @@ if __name__ == '__main__':
             pprint(stmt.def_in, width=20, indent=12)
             print(f"\t\tdef out:")
             pprint(stmt.def_out, width=20, indent=12)
-    exit(0)
+
     res.compute_liveness()
     for bb in res.bbs:
         print(f"{header}\nbb {bb.name} liveness: ")

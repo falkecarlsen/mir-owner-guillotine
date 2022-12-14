@@ -336,41 +336,59 @@ class CFG:
                 pass
                 # self.bbs[succ_index].pred.add(pred)
 
+    # noinspection PyUnresolvedReferences
     def finalise_cfg(self):
+        # set bb succ, pred, entry, exit
         self.fill_in_bb_pred_succ()
-        # compute succ and pred for each stmt in each bb
+        self.find_and_set_entry_exit()
+
+        # compute succ and pred for each stmt in each bb for the combination of bools
+        # first, last, is_entry, is_exit
         for bb in self.bbs:
             for i, stmt in enumerate(bb.stmts):
-                # fixme; hacky, as succs are bb-indicies not stmt indicies
                 # use tuples (bb_index, stmt_index), bb_index None if within same bb
                 # bb_index points to succ/pred bb_index if traversing basic blocks
 
+                last = i == len(bb.stmts) - 1
+                first = i == 0
+
                 # last stmt in bb
-                if i == len(bb.stmts) - 1:
+                if not first and last:
                     stmt.pred.add((None, i - 1))
                     for succ in bb.succ:
-                        # (bb_index, stmt_index) always the first in a succ
                         stmt.succ.add((succ, 0))
 
                 # first stmt in bb
-                if i == 0:
+                elif first and not last:
                     stmt.succ.add((None, i + 1))
                     for pred in bb.pred:
-                        # (bb_index, stmt_index) always the last in a pred
                         stmt.pred.add((pred, len(self.bbs[pred].stmts) - 1))
 
                 # middle stmt in bb
-                else:
+                elif not first and not last:
                     assert i > 0
                     stmt.succ.add((None, i + 1))
                     stmt.pred.add((None, i - 1))
 
+                elif first and last:
+                    for pred in bb.pred:
+                        stmt.pred.add((pred, len(self.bbs[pred].stmts) - 1))
+                    for succ in bb.succ:
+                        stmt.succ.add((succ, 0))
+
+                else:
+                    assert False, f"Impossible state during {self.__class__.__name__} finalise_cfg"
+
+                # if entry or exit, reset pred/succ
+                if stmt == self.entry:
+                    stmt.pred = None
+
+                elif stmt == self.exit:
+                    stmt.succ = None
+
                 # run gens and kills on each stmt
                 stmt.defs = stmt.gen_defs()
                 stmt.uses = stmt.gen_uses()
-
-        # set entry and exit nodes
-        self.find_and_set_entry_exit()
 
         # assert that all succ and preds in CFG are of the type Set[Tuple[Optional[int], int]]
         for bb in self.bbs:
@@ -450,10 +468,6 @@ class CFGUDChain(CFG):
                     # union of defs and in_sans_uses (defs | in_sans_uses), filtering None locations
                     stmt.def_out = set(filter(lambda x: x.location is not None, defs | in_sans_uses))
 
-                    # remove None values from def_in and def_out
-                    stmt.def_in.discard(None)
-                    stmt.def_out.discard(None)
-
                     # update def_in for bb if first statement in bb
                     if bb.stmts.index(stmt) == 0:
                         bb.def_in = stmt.def_in.copy()
@@ -479,8 +493,8 @@ class CFGUDChain(CFG):
         # IN[n] = use[n] U (OUT[n] - def[n])
         while True:
             change = False
-            for bb in reversed(self.bbs):
-                for stmt in reversed(bb.stmts):
+            for b_i, bb in reversed(list(enumerate(self.bbs))):
+                for s_i, stmt in reversed(list(enumerate(bb.stmts))):
                     # remember old live_in and live_out
                     old_live_in = stmt.live_in.copy()
                     old_live_out = stmt.live_out.copy()
