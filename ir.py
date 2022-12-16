@@ -4,46 +4,7 @@ from itertools import groupby, combinations
 from pprint import pprint
 from typing import Optional, Any, List, Set, Dict, Tuple
 
-import numpy as np
-
 DEBUG = True
-
-
-class FlagMatrix:
-    """
-    FlagMatrix describing the borrowing status of locations
-    Transposed wrt. the paper to make it easier to work with
-    """
-
-    # symbols
-    symbols = {'i': 2, 'm': 1, '0': 0}
-
-    def __init__(self, max_size: int):
-        self.matrix = np.array([[self.symbols['0']] * max_size] * max_size)
-
-    # define whether matrix represent legal borrowing
-    def legal(self) -> bool:
-        # check matrix for each column, denoting a locations
-        for c_i, c in enumerate(self.matrix):
-            if DEBUG:
-                print(f"column {c_i}: {c}")
-            high_status = self.symbols['0']
-            for s_i, s in enumerate(c):
-                if DEBUG:
-                    print(f"symbol {s_i}: {s}")
-                high_status = max(high_status, s)
-                if DEBUG:
-                    print(f"max: {high_status}")
-                if s < high_status:
-                    return False
-                # update
-                last = s
-        return True
-
-    # pretty print matrix substituting self.symbols values with their keys
-    def pprint(self):
-        for c in self.matrix:
-            print([list(self.symbols.keys())[list(self.symbols.values()).index(i)] for i in c])
 
 
 class StatementType(Enum):
@@ -300,6 +261,46 @@ class BasicBlock:
         self.stmts.extend(stmts)
 
 
+@dataclass()
+class Borrow:
+    """
+    Borrow is a dataclass that represents a borrow of a location.
+    Borrower is the location holding the reference to a borrowee
+    """
+
+    borrower: int = None
+    borrowee: int = None
+    mutable: bool = False
+    bb_index: int = None
+    stmt_index: int = None
+
+    def __hash__(self):
+        return hash((self.borrower, self.borrowee, self.mutable, self.bb_index, self.stmt_index))
+
+    def __eq__(self, other):
+        return self.__hash__() == other.__hash__()
+
+    def __repr__(self):
+        return (
+            f"Borrow(er={self.borrower}, ee={self.borrowee}, mut={self.mutable}, bb{self.bb_index}, s{self.stmt_index})"
+        )
+
+    def overlaps(self, cfg: 'CFG', other_borrow: 'Borrow') -> tuple[bool, Optional[int], Optional[int]]:
+        """
+        Returns true if the borrower of this borrow is live in the other borrow
+        """
+        a = self.borrower
+        b = other_borrow.borrower
+        # enumerate with index all stmts in cfg
+        for bb_index, bb in enumerate(cfg.bbs):
+            for stmt_index, stmt in enumerate(bb.stmts):
+                # check if both borrows are live at same program point
+                if a in stmt.live_in and b in stmt.live_in:
+                    # then problem
+                    return True, bb_index, stmt_index
+        return False, None, None
+
+
 class CFG:
     """
     Control flow graph data structure using BasicBlock as nodes, and edges by pred and succ on BasicBlock/linkedlist
@@ -439,54 +440,6 @@ class CFG:
             print(f"BB {bb.name}:\n\tSucc: {bb.succ}\n\tPred: {bb.pred}")
         print(f"CFG entry: {self.entry}, exit: {self.exit}")
 
-
-@dataclass()
-class Borrow:
-    """
-    Borrow is a dataclass that represents a borrow of a location.
-    Borrower is the location holding the reference to a borrowee
-    """
-
-    borrower: int = None
-    borrowee: int = None
-    mutable: bool = False
-    bb_index: int = None
-    stmt_index: int = None
-
-    def __hash__(self):
-        return hash((self.borrower, self.borrowee, self.mutable, self.bb_index, self.stmt_index))
-
-    def __eq__(self, other):
-        return self.__hash__() == other.__hash__()
-
-    def __repr__(self):
-        return (
-            f"Borrow(er={self.borrower}, ee={self.borrowee}, mut={self.mutable}, bb{self.bb_index}, s{self.stmt_index})"
-        )
-
-    def overlaps(self, cfg: CFG, other_borrow: 'Borrow') -> tuple[bool, Optional[int], Optional[int]]:
-        """
-        Returns true if the borrower of this borrow is live in the other borrow
-        """
-        a = self.borrower
-        b = other_borrow.borrower
-        # enumerate with index all stmts in cfg
-        for bb_index, bb in enumerate(cfg.bbs):
-            for stmt_index, stmt in enumerate(bb.stmts):
-                # check if both borrows are live at same program point
-                if a in stmt.live_in and b in stmt.live_in:
-                    # then problem
-                    return True, bb_index, stmt_index
-        return False, None, None
-
-
-class CFGUDChain(CFG):
-    def __init__(self):
-        super().__init__()
-
-    def __repr__(self):
-        return f"CFGUDChain(bbs={self.bbs}, edges={self.edges}, entry={self.entry}, exit={self.exit})"
-
     def compute_reaching_definitions(self):
         """
         Compute reaching definitions. Use tuple of (bb_index, and stmt_index) as definitions points.
@@ -620,7 +573,7 @@ class CFGUDChain(CFG):
             borrow_set = set(borrow_set)
 
             # debug print state, with newline and tabbed borrow-set elements
-            print(f"Bckign borrowee {borrowee} with borrows: ")
+            print(f"Bcking borrowee {borrowee} with borrows: ")
             for borrow in borrow_set:
                 print(f"\t{borrow}")
 
@@ -632,10 +585,7 @@ class CFGUDChain(CFG):
                     # type annotation
                     borrow1: Borrow
                     borrow2: Borrow
-                    print(
-                        f"checking \t{borrow1} "
-                        f"\nand \t\t{borrow2}"
-                    )
+                    print(f"checking \t{borrow1} " f"\nand \t\t{borrow2}")
 
                     # if both are immutable, we don't care about overlap
                     if not borrow1.mutable and not borrow2.mutable:
@@ -645,7 +595,7 @@ class CFGUDChain(CFG):
                     # if overlap with mutable borrow, return false
                     overlap, lap_b_i, lap_s_i = borrow1.overlaps(self, borrow2)
                     if overlap:
-                        print(f"BCK ERROR: found overlap at {lap_b_i}, {lap_s_i}\n")
+                        print(f"BCK ERROR: found overlap at b_i: {lap_b_i}, s_i: {lap_s_i}\n")
                         return False
                     else:
                         print(f"no overlap\n")
@@ -653,24 +603,3 @@ class CFGUDChain(CFG):
                 # no mutable borrows, so no need to check for overlap
                 print(f"no mutable borrows for: {borrowee}, have {len(borrow_set)} immutable borrows, all good.")
         return True
-
-
-if __name__ == '__main__':
-    a = FlagMatrix(2)
-    b = FlagMatrix(2)
-    a.matrix[0][0] = FlagMatrix.symbols['i']
-    a.matrix[0][1] = FlagMatrix.symbols['m']
-    a.matrix[1][0] = FlagMatrix.symbols['m']
-    a.matrix[1][1] = FlagMatrix.symbols['i']
-    # a.matrix[0][1] = FlagMatrix.symbols['m']
-    print(a.legal())
-    print(b.legal())
-    pprint(a.matrix)
-    a.pprint()
-
-    exit()
-
-    pprint(a.matrix)
-    pprint(b.matrix)
-    print()
-    print(a.matrix[0, :])

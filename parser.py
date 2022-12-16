@@ -156,7 +156,7 @@ class MirParser(Parser):
 
     def __init__(self):
         self.curr_bb_id: int = -1
-        self.cfg: ir.CFG = ir.CFGUDChain()
+        self.cfg: ir.CFG = ir.CFG()
         self.temp_stmts: List[ir.Statement] = []
         self.stmt: ir.Statement = ir.Statement()
 
@@ -696,7 +696,7 @@ if __name__ == '__main__':
         )
 
     print(f"{header}\nparsing: ")
-    res: ir.CFGUDChain = parse(text)
+    res: ir.CFG = parse(text)
     print(f"{header}\nparsing result: ")
 
     print(f"{header}\ncfg pprint: ")
@@ -724,4 +724,6 @@ if __name__ == '__main__':
             # print live in/live out
             print(f"\tstmt:{i} live in: {stmt.live_in} \t live out: {stmt.live_out}")
     print(f"{header}\nBorrow-checking: ")
-    print(f"borrow-check thinks program is valid? {res.borrow_check(res.compute_borrows())}")
+    bck_res = res.borrow_check(res.compute_borrows())
+    print(f"borrow-check thinks program is valid? {bck_res}")
+    exit(0 if bck_res else 1)
