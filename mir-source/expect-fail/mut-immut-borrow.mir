@@ -1,0 +1,13 @@
+bb0: {
+    _1 = HashMap::new(const 42_u32);
+    _3 = &(*_1);
+    _2 = HashMap::<u32, String>::get::<u32>(move _3, move _5) -> bb1;
+    _4 = &mut (*_1); // 2, 4 \in live_out
+    _5 = ((_2 as Some).0: &std::string::String); //4 \in live_out // problem; 4 \in live_out
+    _0 = &mut (*_4);
+    goto -> bb1;
+}
+
+bb1: {
+   return;
+}

@@ -297,7 +297,8 @@ class MirParser(Parser):
     @_('RETURN ";"')
     def statement(self, p):
         print('return', p.RETURN)
-        self.stmt.stmt_type = ir.StatementType.RETURN
+        self.stmt = ir.PrimitiveFunctionStatement()
+        self.stmt.primitive_type = "return"
         self.add_curr_stmt_and_reset()
 
     # stmttype -> LOCATION | constant | borrow | goto | unreachable | return | function_call | move
@@ -334,14 +335,14 @@ class MirParser(Parser):
     def borrow(self, p):
         print('borrow', p.source)
         self.stmt.value_type = ir.ValueType.BORROW
-        self.stmt.mutability = False
+        self.stmt.mutable = False
         return p.source
 
     @_('REFMUT source')
     def borrow(self, p):
         print('borrow', p.source)
         self.stmt.value_type = ir.ValueType.BORROW
-        self.stmt.mutability = True
+        self.stmt.mutable = True
         return p.source
 
     # source -> ( source ) | LOCATION | DEREF LOCATION
@@ -679,7 +680,7 @@ if __name__ == '__main__':
     bold = '\033[1m'
     unbold = '\033[0m'
     header = "=" * 10
-    in_file = 'mir-source/expect-pass/get_or_insert.mir'
+    in_file = 'mir-source/expect-fail/mut-immut-borrow.mir'
 
     text = open(in_file, 'r').read()
 
@@ -722,4 +723,5 @@ if __name__ == '__main__':
         for i, stmt in enumerate(bb.stmts):
             # print live in/live out
             print(f"\tstmt:{i} live in: {stmt.live_in} \t live out: {stmt.live_out}")
-    print("fuck")
+    print(f"{header}\nBorrow-checking: ")
+    print(f"borrow-check thinks program is valid? {res.borrow_check(res.compute_borrows())}")

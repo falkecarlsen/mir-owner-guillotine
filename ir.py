@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from itertools import groupby, combinations
 from pprint import pprint
 from typing import Optional, Any, List, Set, Dict, Tuple
 
@@ -95,10 +96,9 @@ class Statement:
 
     stmt_type: Optional[StatementType] = None
     lhs_location: int = None
-    mutability: Optional[bool] = False
+    mutable: Optional[bool] = False
     value_type: Optional[ValueType] = None
     rhs_location: Optional[int] = None
-    rhs_op: Optional[str] = None
     rhs_value: Optional[Any] = None
     pred: Set[Tuple[Optional[int], int]] = field(default_factory=set)
     succ: Set[Tuple[Optional[int], int]] = field(default_factory=set)
@@ -116,6 +116,13 @@ class Statement:
     defs: Set[int] = field(default_factory=set)
     # uses[i] = {x | x is defined in Statement() i}
     uses: Set[int] = field(default_factory=set)
+
+    def borrow(self) -> bool:
+        """
+        Check if statement borrows
+        :return: True if statement borrows
+        """
+        return self.value_type == ValueType.BORROW
 
     def gen_defs(self):
         """
@@ -144,8 +151,7 @@ class Statement:
             f"\t\trhs_location={self.rhs_location}, \n"
             f"\t\trhs_value={self.rhs_value}, \n"
             f"\t\trhs_type={self.value_type}, \n"
-            f"\t\trhs_op={self.rhs_op}, \n"
-            f"\t\tmutability={self.mutability}\n"
+            f"\t\tmutability={self.mutable}\n"
             f"\t\tgen={self.defs}\n"
             f"\t\tkill={self.uses}\n"
             f"\t)"
@@ -195,6 +201,14 @@ class FunctionStatement(Statement):
     function_type: Optional[str] = None
     function_args: Optional[List[FunctionArg]] = field(default_factory=list)
     bb_goto: Optional[int] = None
+
+    def reborrow(self, borrows: Set['Borrow']):
+        for use in self.uses:
+            for borrow in borrows:
+                if "get" in self.function_method and any("HashMap" in t for t in self.function_type):
+                    if use == borrow.borrower:
+                        return use, borrow
+        return None, None
 
     def gen_uses(self):
         """
@@ -247,6 +261,8 @@ class PrimitiveFunctionStatement(Statement):
             if arg.location is not None:
                 if arg.mode in [Mode.MOVE] or self.primitive_type == "drop":
                     use_set.add(arg.location)
+        if self.primitive_type == "return":
+            use_set.add(0)
         return use_set
 
     # repr
@@ -424,6 +440,46 @@ class CFG:
         print(f"CFG entry: {self.entry}, exit: {self.exit}")
 
 
+@dataclass()
+class Borrow:
+    """
+    Borrow is a dataclass that represents a borrow of a location.
+    Borrower is the location holding the reference to a borrowee
+    """
+
+    borrower: int = None
+    borrowee: int = None
+    mutable: bool = False
+    bb_index: int = None
+    stmt_index: int = None
+
+    def __hash__(self):
+        return hash((self.borrower, self.borrowee, self.mutable, self.bb_index, self.stmt_index))
+
+    def __eq__(self, other):
+        return self.__hash__() == other.__hash__()
+
+    def __repr__(self):
+        return (
+            f"Borrow(er={self.borrower}, ee={self.borrowee}, mut={self.mutable}, bb{self.bb_index}, s{self.stmt_index})"
+        )
+
+    def overlaps(self, cfg: CFG, other_borrow: 'Borrow') -> tuple[bool, Optional[int], Optional[int]]:
+        """
+        Returns true if the borrower of this borrow is live in the other borrow
+        """
+        a = self.borrower
+        b = other_borrow.borrower
+        # enumerate with index all stmts in cfg
+        for bb_index, bb in enumerate(cfg.bbs):
+            for stmt_index, stmt in enumerate(bb.stmts):
+                # check if both borrows are live at same program point
+                if a in stmt.live_in and b in stmt.live_in:
+                    # then problem
+                    return True, bb_index, stmt_index
+        return False, None, None
+
+
 class CFGUDChain(CFG):
     def __init__(self):
         super().__init__()
@@ -500,14 +556,13 @@ class CFGUDChain(CFG):
                     old_live_out = stmt.live_out.copy()
 
                     # compute OUT[n] = U IN[s] for each s in succ[n]
-                    if stmt is not self.exit:  # exit does not have succs
-                        for succ in stmt.succ:
-                            # if succ is within same bb
-                            if succ[0] is None:
-                                stmt.live_out.update(bb.stmts[succ[1]].live_in)
-                            # if succ is in a different bb
-                            else:
-                                stmt.live_out.update(self.bbs[succ[0]].live_in)
+                    for succ in stmt.succ:
+                        # if succ is within same bb
+                        if succ[0] is None:
+                            stmt.live_out.update(bb.stmts[succ[1]].live_in)
+                        # if succ is in a different bb
+                        else:
+                            stmt.live_out.update(self.bbs[succ[0]].live_in)
 
                     # compute IN[n] = use[n] U (OUT[n] - def[n])
                     stmt.live_in = stmt.uses.union(stmt.live_out.difference(stmt.defs))
@@ -526,6 +581,78 @@ class CFGUDChain(CFG):
 
             if not change:
                 break
+
+    def compute_borrows(self) -> list[Borrow]:
+        # get all statements which borrow() is true, with their bb_index and stmt_index and borrow info
+        borrows = set(
+            Borrow(stmt.lhs_location, stmt.rhs_location, stmt.mutable, b_i, s_i)
+            for b_i, bb in enumerate(self.bbs)
+            for s_i, stmt in enumerate(bb.stmts)
+            if stmt.borrow()
+        )
+
+        # add 'reborrows' from stmt semantics, e.g. 'reborrow = Hashmap::get(move ref)'
+        function_borrows = set()
+        for b_i, bb in enumerate(self.bbs):
+            for s_i, stmt in enumerate(bb.stmts):
+                # if statement which may reborrow
+                if isinstance(stmt, FunctionStatement):
+                    # get possible reborrows
+                    use, borrow = stmt.reborrow(borrows)
+                    # add to set of borrows if actually reborrows, borrowee is the original borrow's borrowee
+                    if use and borrow:
+                        function_borrows.add(Borrow(stmt.lhs_location, borrow.borrowee, borrow.mutable, b_i, s_i))
+
+        # union newly found borrows, sorting by borrowee, then borrower - casting to list, to keep order for groupby
+        return list(sorted(borrows | function_borrows, key=lambda x: (x.borrowee, x.borrower)))
+
+    def borrow_check(self, borrows: list[Borrow]) -> bool:
+        """
+        Check if borrows are still valid according to Rust borrowing rules, per
+        https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html:
+        - At any given time, you can have either one mutable reference or any number of immutable references. (crux)
+        - References must always be valid (moot, since previous compiler phases do this)
+        """
+        # for each set of borrows (set of Borrow-objects) where borrowee (location) is identical
+        for borrowee, borrow_set in groupby(borrows, lambda x: x.borrowee):
+            # pedantic: avoid consumption by advancing groupby-iterator
+            # (https://stackoverflow.com/questions/34644010/iterator-produced-by-itertools-groupby-is-consumed-unexpectedly)
+            borrow_set = set(borrow_set)
+
+            # debug print state, with newline and tabbed borrow-set elements
+            print(f"Bckign borrowee {borrowee} with borrows: ")
+            for borrow in borrow_set:
+                print(f"\t{borrow}")
+
+            # if one or more mutable borrows, must check that mut-borrow is not live at same time as any immut-borrows
+            if len(list(filter(lambda x: x.mutable, borrow_set))) >= 1:
+
+                # for each combination of borrow for a given borrowee, check if they overlap
+                for borrow1, borrow2 in combinations(borrow_set, 2):
+                    # type annotation
+                    borrow1: Borrow
+                    borrow2: Borrow
+                    print(
+                        f"checking \t{borrow1} "
+                        f"\nand \t\t{borrow2}"
+                    )
+
+                    # if both are immutable, we don't care about overlap
+                    if not borrow1.mutable and not borrow2.mutable:
+                        print("both immutable, don't care about overlap\n")
+                        continue
+
+                    # if overlap with mutable borrow, return false
+                    overlap, lap_b_i, lap_s_i = borrow1.overlaps(self, borrow2)
+                    if overlap:
+                        print(f"BCK ERROR: found overlap at {lap_b_i}, {lap_s_i}\n")
+                        return False
+                    else:
+                        print(f"no overlap\n")
+            else:
+                # no mutable borrows, so no need to check for overlap
+                print(f"no mutable borrows for: {borrowee}, have {len(borrow_set)} immutable borrows, all good.")
+        return True
 
 
 if __name__ == '__main__':
