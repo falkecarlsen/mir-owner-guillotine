@@ -1,0 +1,249 @@
+fn <impl at src/main.rs:1:10: 1:15>::fmt(_1: &Foo<'_>, _2: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+    debug self => _1;                    // in scope 0 at src/main.rs:1:10: 1:15
+    debug f => _2;                       // in scope 0 at src/main.rs:1:10: 1:15
+    let mut _0: std::result::Result<(), std::fmt::Error>; // return place in scope 0 at src/main.rs:1:10: 1:15
+    let mut _3: &mut std::fmt::Formatter<'_>; // in scope 0 at src/main.rs:1:10: 1:15
+    let mut _4: &str;                    // in scope 0 at src/main.rs:1:10: 1:15
+    let _5: &str;                        // in scope 0 at src/main.rs:1:10: 1:15
+    let mut _6: &str;                    // in scope 0 at src/main.rs:3:5: 3:18
+    let _7: &str;                        // in scope 0 at src/main.rs:3:5: 3:18
+    let mut _8: &dyn std::fmt::Debug;    // in scope 0 at src/main.rs:3:5: 3:18
+    let mut _9: &&&u32;                  // in scope 0 at src/main.rs:3:5: 3:18
+    let _10: &&&u32;                     // in scope 0 at src/main.rs:3:5: 3:18
+    let _11: &&u32;                      // in scope 0 at src/main.rs:3:5: 3:18
+
+    bb0: {
+        _3 = &mut (*_2);                 // scope 0 at src/main.rs:1:10: 1:15
+        _5 = const "Foo";                // scope 0 at src/main.rs:1:10: 1:15
+                                         // mir::Constant
+                                         // + span: src/main.rs:1:10: 1:15
+                                         // + literal: Const { ty: &str, val: Value(Slice(..)) }
+        _4 = _5;                         // scope 0 at src/main.rs:1:10: 1:15
+        _7 = const "data";               // scope 0 at src/main.rs:3:5: 3:18
+                                         // mir::Constant
+                                         // + span: src/main.rs:3:5: 3:18
+                                         // + literal: Const { ty: &str, val: Value(Slice(..)) }
+        _6 = _7;                         // scope 0 at src/main.rs:3:5: 3:18
+        _11 = &((*_1).0: &u32);          // scope 0 at src/main.rs:3:5: 3:18
+        _10 = &_11;                      // scope 0 at src/main.rs:3:5: 3:18
+        _9 = _10;                        // scope 0 at src/main.rs:3:5: 3:18
+        _8 = move _9 as &dyn std::fmt::Debug (Pointer(Unsize)); // scope 0 at src/main.rs:3:5: 3:18
+        _0 = Formatter::<'_>::debug_struct_field1_finish(move _3, move _4, move _6, move _8) -> bb1; // scope 0 at src/main.rs:1:10: 1:15
+                                         // mir::Constant
+                                         // + span: src/main.rs:1:10: 1:15
+                                         // + user_ty: UserType(0)
+                                         // + literal: Const { ty: for<'b, 'a, 'c, 'd> fn(&'b mut Formatter<'_>, &'a str, &'c str, &'d (dyn Debug + 'd)) -> Result<(), std::fmt::Error> {Formatter::<'_>::debug_struct_field1_finish}, val: Value(<ZST>) }
+    }
+
+    bb1: {
+        return;                          // scope 0 at src/main.rs:1:15: 1:15
+    }
+}
+
+fn <impl at src/main.rs:6:1: 6:26>::drop(_1: &mut Foo<'_>) -> () {
+    debug self => _1;                    // in scope 0 at src/main.rs:7:13: 7:22
+    let mut _0: ();                      // return place in scope 0 at src/main.rs:7:24: 7:24
+    let _2: ();                          // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:9: 136:62
+    let mut _3: std::fmt::Arguments<'_>; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let mut _4: &[&str];                 // in scope 0 at src/main.rs:9:18: 9:41
+    let mut _5: &[&str; 2];              // in scope 0 at src/main.rs:9:18: 9:41
+    let _6: &[&str; 2];                  // in scope 0 at src/main.rs:9:18: 9:41
+    let mut _7: &[std::fmt::ArgumentV1<'_>]; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let mut _8: &[std::fmt::ArgumentV1<'_>; 1]; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let _9: &[std::fmt::ArgumentV1<'_>; 1]; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let _10: [std::fmt::ArgumentV1<'_>; 1]; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let mut _11: std::fmt::ArgumentV1<'_>; // in scope 0 at src/main.rs:9:43: 9:52
+    let mut _12: &&u32;                  // in scope 0 at src/main.rs:9:43: 9:52
+    let _13: &&u32;                      // in scope 0 at src/main.rs:9:43: 9:52
+    let mut _14: &[&str; 2];             // in scope 0 at src/main.rs:9:18: 9:41
+
+    bb0: {
+        _14 = const _;                   // scope 0 at src/main.rs:9:18: 9:41
+                                         // mir::Constant
+                                         // + span: src/main.rs:9:18: 9:41
+                                         // + literal: Const { ty: &[&str; 2], val: Unevaluated(<Foo<'a> as Drop>::drop, [ReErased], Some(promoted[0])) }
+        _6 = _14;                        // scope 0 at src/main.rs:9:18: 9:41
+        _5 = _6;                         // scope 0 at src/main.rs:9:18: 9:41
+        _4 = move _5 as &[&str] (Pointer(Unsize)); // scope 0 at src/main.rs:9:18: 9:41
+        _13 = &((*_1).0: &u32);          // scope 0 at src/main.rs:9:43: 9:52
+        _12 = _13;                       // scope 0 at src/main.rs:9:43: 9:52
+        _11 = ArgumentV1::<'_>::new_debug::<&u32>(move _12) -> bb1; // scope 0 at src/main.rs:9:43: 9:52
+                                         // mir::Constant
+                                         // + span: src/main.rs:9:43: 9:52
+                                         // + user_ty: UserType(1)
+                                         // + literal: Const { ty: for<'b> fn(&'b &u32) -> ArgumentV1<'b> {ArgumentV1::<'_>::new_debug::<&u32>}, val: Value(<ZST>) }
+    }
+
+    bb1: {
+        _10 = [move _11];                // scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+        _9 = &_10;                       // scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+        _8 = _9;                         // scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+        _7 = move _8 as &[std::fmt::ArgumentV1<'_>] (Pointer(Unsize)); // scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+        _3 = Arguments::<'_>::new_v1(move _4, move _7) -> bb2; // scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+                                         // mir::Constant
+                                         // + span: /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+                                         // + user_ty: UserType(0)
+                                         // + literal: Const { ty: fn(&[&'static str], &[ArgumentV1<'_>]) -> Arguments<'_> {Arguments::<'_>::new_v1}, val: Value(<ZST>) }
+    }
+
+    bb2: {
+        _2 = _print(move _3) -> bb3;     // scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:9: 136:62
+                                         // mir::Constant
+                                         // + span: /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:9: 136:27
+                                         // + literal: Const { ty: for<'a> fn(Arguments<'a>) {_print}, val: Value(<ZST>) }
+    }
+
+    bb3: {
+        return;                          // scope 0 at src/main.rs:10:6: 10:6
+    }
+}
+
+promoted[0] in <impl at src/main.rs:6:1: 6:26>::drop: &[&str; 2] = {
+    let mut _0: &[&str; 2];              // return place in scope 0 at src/main.rs:9:18: 9:41
+    let mut _1: [&str; 2];               // in scope 0 at src/main.rs:9:18: 9:41
+
+    bb0: {
+        _1 = [const "dropping, we had ", const "\n"]; // scope 0 at src/main.rs:9:18: 9:41
+                                         // mir::Constant
+                                         // + span: src/main.rs:9:18: 9:41
+                                         // + literal: Const { ty: &str, val: Value(Slice(..)) }
+                                         // mir::Constant
+                                         // + span: src/main.rs:9:18: 9:41
+                                         // + literal: Const { ty: &str, val: Value(Slice(..)) }
+        _0 = &_1;                        // scope 0 at src/main.rs:9:18: 9:41
+        return;                          // scope 0 at src/main.rs:9:18: 9:41
+    }
+}
+
+fn main() -> () {
+    let mut _0: ();                      // return place in scope 0 at src/main.rs:13:11: 13:11
+    let _1: u32;                         // in scope 0 at src/main.rs:14:9: 14:10
+    let mut _3: &u32;                    // in scope 0 at src/main.rs:15:25: 15:27
+    let _4: &u32;                        // in scope 0 at src/main.rs:15:25: 15:27
+    let _5: ();                          // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:9: 136:62
+    let mut _6: std::fmt::Arguments<'_>; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let mut _7: &[&str];                 // in scope 0 at src/main.rs:16:14: 16:24
+    let mut _8: &[&str; 2];              // in scope 0 at src/main.rs:16:14: 16:24
+    let _9: &[&str; 2];                  // in scope 0 at src/main.rs:16:14: 16:24
+    let mut _10: &[std::fmt::ArgumentV1<'_>]; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let mut _11: &[std::fmt::ArgumentV1<'_>; 1]; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let _12: &[std::fmt::ArgumentV1<'_>; 1]; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let _13: [std::fmt::ArgumentV1<'_>; 1]; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let mut _14: std::fmt::ArgumentV1<'_>; // in scope 0 at src/main.rs:16:26: 16:27
+    let mut _15: &Foo<'_>;               // in scope 0 at src/main.rs:16:26: 16:27
+    let _16: &Foo<'_>;                   // in scope 0 at src/main.rs:16:26: 16:27
+    let _17: ();                         // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:9: 136:62
+    let mut _18: std::fmt::Arguments<'_>; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let mut _19: &[&str];                // in scope 0 at src/main.rs:17:14: 17:24
+    let mut _20: &[&str; 2];             // in scope 0 at src/main.rs:17:14: 17:24
+    let _21: &[&str; 2];                 // in scope 0 at src/main.rs:17:14: 17:24
+    let mut _22: &[std::fmt::ArgumentV1<'_>]; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let mut _23: &[std::fmt::ArgumentV1<'_>; 1]; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let _24: &[std::fmt::ArgumentV1<'_>; 1]; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let _25: [std::fmt::ArgumentV1<'_>; 1]; // in scope 0 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+    let mut _26: std::fmt::ArgumentV1<'_>; // in scope 0 at src/main.rs:17:26: 17:27
+    let mut _27: &u32;                   // in scope 0 at src/main.rs:17:26: 17:27
+    let _28: &u32;                       // in scope 0 at src/main.rs:17:26: 17:27
+    scope 1 {
+        debug x => _1;                   // in scope 1 at src/main.rs:14:9: 14:10
+        let _2: Foo<'_>;                 // in scope 1 at src/main.rs:15:9: 15:10
+        scope 2 {
+            debug y => _2;               // in scope 2 at src/main.rs:15:9: 15:10
+            let mut _29: &[&str; 2];     // in scope 2 at src/main.rs:17:14: 17:24
+            let mut _30: &[&str; 2];     // in scope 2 at src/main.rs:16:14: 16:24
+        }
+    }
+
+    bb0: {
+        _1 = const 13_u32;               // scope 0 at src/main.rs:14:13: 14:15
+        _4 = &_1;                        // scope 1 at src/main.rs:15:25: 15:27
+        _3 = _4;                         // scope 1 at src/main.rs:15:25: 15:27
+        Deinit(_2);                      // scope 1 at src/main.rs:15:13: 15:29
+        (_2.0: &u32) = move _3;          // scope 1 at src/main.rs:15:13: 15:29
+        _30 = const _;                   // scope 2 at src/main.rs:16:14: 16:24
+                                         // mir::Constant
+                                         // + span: src/main.rs:16:14: 16:24
+                                         // + literal: Const { ty: &[&str; 2], val: Unevaluated(main, [], Some(promoted[1])) }
+        _9 = _30;                        // scope 2 at src/main.rs:16:14: 16:24
+        _8 = _9;                         // scope 2 at src/main.rs:16:14: 16:24
+        _7 = move _8 as &[&str] (Pointer(Unsize)); // scope 2 at src/main.rs:16:14: 16:24
+        _16 = &_2;                       // scope 2 at src/main.rs:16:26: 16:27
+        _15 = _16;                       // scope 2 at src/main.rs:16:26: 16:27
+        _14 = ArgumentV1::<'_>::new_debug::<Foo<'_>>(move _15) -> [return: bb1, unwind: bb8]; // scope 2 at src/main.rs:16:26: 16:27
+                                         // mir::Constant
+                                         // + span: src/main.rs:16:26: 16:27
+                                         // + user_ty: UserType(1)
+                                         // + literal: Const { ty: for<'b> fn(&'b Foo<'_>) -> ArgumentV1<'b> {ArgumentV1::<'_>::new_debug::<Foo<'_>>}, val: Value(<ZST>) }
+    }
+
+    bb1: {
+        _13 = [move _14];                // scope 2 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+        _12 = &_13;                      // scope 2 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+        _11 = _12;                       // scope 2 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+        _10 = move _11 as &[std::fmt::ArgumentV1<'_>] (Pointer(Unsize)); // scope 2 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+        _6 = Arguments::<'_>::new_v1(move _7, move _10) -> [return: bb2, unwind: bb8]; // scope 2 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+                                         // mir::Constant
+                                         // + span: /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+                                         // + user_ty: UserType(0)
+                                         // + literal: Const { ty: fn(&[&'static str], &[ArgumentV1<'_>]) -> Arguments<'_> {Arguments::<'_>::new_v1}, val: Value(<ZST>) }
+    }
+
+    bb2: {
+        _5 = _print(move _6) -> [return: bb3, unwind: bb8]; // scope 2 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:9: 136:62
+                                         // mir::Constant
+                                         // + span: /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:9: 136:27
+                                         // + literal: Const { ty: for<'a> fn(Arguments<'a>) {_print}, val: Value(<ZST>) }
+    }
+
+    bb3: {
+        _29 = const _;                   // scope 2 at src/main.rs:17:14: 17:24
+                                         // mir::Constant
+                                         // + span: src/main.rs:17:14: 17:24
+                                         // + literal: Const { ty: &[&str; 2], val: Unevaluated(main, [], Some(promoted[0])) }
+        _21 = _29;                       // scope 2 at src/main.rs:17:14: 17:24
+        _20 = _21;                       // scope 2 at src/main.rs:17:14: 17:24
+        _19 = move _20 as &[&str] (Pointer(Unsize)); // scope 2 at src/main.rs:17:14: 17:24
+        _28 = &_1;                       // scope 2 at src/main.rs:17:26: 17:27
+        _27 = _28;                       // scope 2 at src/main.rs:17:26: 17:27
+        _26 = ArgumentV1::<'_>::new_debug::<u32>(move _27) -> [return: bb4, unwind: bb8]; // scope 2 at src/main.rs:17:26: 17:27
+                                         // mir::Constant
+                                         // + span: src/main.rs:17:26: 17:27
+                                         // + user_ty: UserType(3)
+                                         // + literal: Const { ty: for<'b> fn(&'b u32) -> ArgumentV1<'b> {ArgumentV1::<'_>::new_debug::<u32>}, val: Value(<ZST>) }
+    }
+
+    bb4: {
+        _25 = [move _26];                // scope 2 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+        _24 = &_25;                      // scope 2 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+        _23 = _24;                       // scope 2 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+        _22 = move _23 as &[std::fmt::ArgumentV1<'_>] (Pointer(Unsize)); // scope 2 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+        _18 = Arguments::<'_>::new_v1(move _19, move _22) -> [return: bb5, unwind: bb8]; // scope 2 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+                                         // mir::Constant
+                                         // + span: /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:28: 136:61
+                                         // + user_ty: UserType(2)
+                                         // + literal: Const { ty: fn(&[&'static str], &[ArgumentV1<'_>]) -> Arguments<'_> {Arguments::<'_>::new_v1}, val: Value(<ZST>) }
+    }
+
+    bb5: {
+        _17 = _print(move _18) -> [return: bb6, unwind: bb8]; // scope 2 at /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:9: 136:62
+                                         // mir::Constant
+                                         // + span: /rustc/69f9c33d71c871fc16ac445211281c6e7a340943/library/std/src/macros.rs:136:9: 136:27
+                                         // + literal: Const { ty: for<'a> fn(Arguments<'a>) {_print}, val: Value(<ZST>) }
+    }
+
+    bb6: {
+        drop(_2) -> bb7;                 // scope 1 at src/main.rs:18:2: 18:2
+    }
+
+    bb7: {
+        return;                          // scope 0 at src/main.rs:18:2: 18:2
+    }
+
+    bb8 (cleanup): {
+        drop(_2) -> bb9;                 // scope 1 at src/main.rs:18:2: 18:2
+    }
+
+    bb9 (cleanup): {
+        resume;                          // scope 0 at src/main.rs:13:1: 18:2
+    }
+}

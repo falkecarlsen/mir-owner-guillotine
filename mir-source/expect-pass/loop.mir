@@ -1,0 +1,34 @@
+    bb0: {
+        _2 = const 0_i32;                // scope 0 at src/lib.rs:2:17: 2:18
+        _3 = const 1_i32;                // scope 1 at src/lib.rs:3:17: 3:18
+        goto -> bb1;                     // scope 2 at src/lib.rs:6:5: 13:6
+    }
+
+    bb1: {
+        _4 = _1;                         // scope 2 at src/lib.rs:7:12: 7:16
+        switchInt(move _4) -> [0_isize: bb3, otherwise: bb2]; // scope 2 at src/lib.rs:7:12: 7:16
+    }
+
+    bb2: {
+        _5 = _2;                         // scope 2 at src/lib.rs:8:17: 8:18
+        _3 = move _5;                    // scope 2 at src/lib.rs:8:13: 8:18
+        goto -> bb1;                     // scope 2 at src/lib.rs:6:5: 13:6
+    }
+
+    bb3: {
+        _6 = CheckedAdd(_2, const 1_i32); // scope 2 at src/lib.rs:14:5: 14:11
+        assert(!move (_6.1: bool), "attempt to compute `{} + {}`, which would overflow", _2, const 1_i32) -> bb4; // scope 2 at src/lib.rs:14:5: 14:11
+    }
+
+    bb4: {
+        _2 = move (_6.0: i32);           // scope 2 at src/lib.rs:14:5: 14:11
+        _7 = _2;                         // scope 2 at src/lib.rs:15:5: 15:6
+        _8 = _3;                         // scope 2 at src/lib.rs:15:9: 15:10
+        _9 = CheckedAdd(_7, _8);         // scope 2 at src/lib.rs:15:5: 15:10
+        assert(!move (_9.1: bool), "attempt to compute `{} + {}`, which would overflow", move _7, move _8) -> bb5; // scope 2 at src/lib.rs:15:5: 15:10
+    }
+
+    bb5: {
+        _0 = move (_9.0: i32);           // scope 2 at src/lib.rs:15:5: 15:10
+        return;                          // scope 0 at src/lib.rs:16:2: 16:2
+    }

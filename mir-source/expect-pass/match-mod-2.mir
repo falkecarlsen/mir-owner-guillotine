@@ -1,0 +1,27 @@
+bb0: {
+    _1 = const 0_i32;                // scope 0 at src/main.rs:8:17: 8:18
+    goto -> bb1;                     // scope 1 at src/main.rs:10:5: 15:6
+}
+
+bb1: {
+    _3 = _1;                         // scope 1 at src/main.rs:11:15: 11:16
+    _4 = const false;                // scope 1 at src/main.rs:11:15: 11:20
+    _5 = Eq(_3, const 0_isize);     // scope 1 at src/main.rs:11:15: 11:20
+    _6 = BitAnd(move _4, move _5);   // scope 1 at src/main.rs:11:15: 11:20
+    assert(!move _6, "attempt to compute the remainder of `{} % {}`, which would overflow", _3, const 2_i32) -> bb2; // scope 1 at src/main.rs:11:15: 11:20
+}
+
+bb2: {
+    _2 = Rem(move _3, const 2_i32);  // scope 1 at src/main.rs:11:15: 11:20
+    switchInt(_2) -> [0_isize: bb3, otherwise: bb1]; // scope 1 at src/main.rs:11:9: 11:20
+}
+
+bb3: {
+    _7 = CheckedAdd(_1, const 1_i32); // scope 1 at src/main.rs:12:20: 12:26
+    assert(!move (_7.1: bool), "attempt to compute `{} + {}`, which would overflow", _1, const 1_i32) -> bb4; // scope 1 at src/main.rs:12:20: 12:26
+}
+
+bb4: {
+    _1 = move (_7.0: i32);           // scope 1 at src/main.rs:12:20: 12:26
+    goto -> bb1;                     // scope 1 at src/main.rs:12:18: 12:29
+}
