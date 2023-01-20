@@ -7,6 +7,10 @@ from sly import Lexer, Parser
 import ir
 
 """
+
+"""
+
+"""
 Rust MIR simplified grammar for borrow-checking and CFG generation 
 
 <mir> ::= <function>*
@@ -65,6 +69,8 @@ class MirLexer(Lexer):
         DEBUG,
         THICKARROW,
         ASSERT,
+        TRUE,
+        FALSE,
     }
     ignore = ' \t'
     # ignore // comments
@@ -116,10 +122,14 @@ class MirLexer(Lexer):
             r'CheckedMul',
             r'CheckedDiv',
             r'std',
+            r'Thing',
+            r'Eq',
+            r'BitAnd',
+            r'Rem',
         ]
     )
 
-    METHODNAMES = r'|'.join(["index", "insert", "from", "get", "new"])
+    METHODNAMES = r'|'.join(["index", "insert", "from", "get", "new", "maybe_next"])
     PRIMITIVES = r'|'.join(["switchInt", "drop"])
     ASSERT = r'assert'
     CONST = r'const'
@@ -129,6 +139,8 @@ class MirLexer(Lexer):
     OTHERWISE = r'otherwise'
     STRING = r'\".*?\"'
     AS = r'as'
+    TRUE = r'true'
+    FALSE = r'false'
 
     # Ignored pattern
     ignore_newline = r'\n+'
@@ -309,6 +321,13 @@ class MirParser(Parser):
         self.stmt.stmt_type = ir.StatementType.ASSIGN
         self.stmt.rhs_location = self.get_loc_or_bb_int(p.LOCATION)
 
+    @_('MODE LOCATION')
+    def stmttype(self, p):
+        print('stmttype location', p.LOCATION)
+        # create statement
+        self.stmt.stmt_type = ir.StatementType.ASSIGN
+        self.stmt.rhs_location = self.get_loc_or_bb_int(p.LOCATION)
+
     @_('constant')
     def stmttype(self, p):
         print('stmttype', p.constant)
@@ -323,6 +342,10 @@ class MirParser(Parser):
     def constant(self, p):
         print('constant item', p.CONST, p.NUMBER, p.TYPENAMES)
         return p.NUMBER, p.TYPENAMES
+
+    @_('CONST FALSE', 'CONST TRUE')
+    def constant(self, p):
+        return p[1]
 
     @_('borrow')
     def stmttype(self, p):
@@ -368,6 +391,20 @@ class MirParser(Parser):
     def stmttype(self, p):
         print('stmttype unwrap', p.LOCATION, p.NUMBER, p.TYPENAMES1)
         self.stmt.stmt_type = ir.StatementType.ASSIGN
+        # self.stmt.mode = p.mode
+        self.stmt.rhs_location = self.get_loc_or_bb_int(p.LOCATION)
+        self.stmt.value_type = ir.ValueType.UNWRAP
+        self.stmt.unwrap_index = p.NUMBER
+        self.stmt.unwrap_type = p.TYPENAMES1
+        return p.TYPENAMES1
+
+    # result type unwrap hack
+    @_('mode "(" "(" LOCATION AS TYPENAMES ")" "." NUMBER ":" REFMUT TYPENAMES ")"')
+    def stmttype(self, p):
+        print('stmttype unwrap', p.LOCATION, p.NUMBER, p.TYPENAMES1)
+        self.stmt.stmt_type = ir.StatementType.ASSIGN
+        self.stmt.mode = p.mode
+        self.stmt.mutable = True
         self.stmt.rhs_location = self.get_loc_or_bb_int(p.LOCATION)
         self.stmt.value_type = ir.ValueType.UNWRAP
         self.stmt.unwrap_index = p.NUMBER

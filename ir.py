@@ -49,6 +49,17 @@ class Definition:
         return f"Def(loc={self.location}, bb{self.bb_index}, s{self.stmt_index})"
 
 
+class Mode(Enum):
+    """
+    Mode of ownership transfer (move or copy)
+    """
+
+    NONE = auto()
+    MOVE = auto()
+    NOT_MOVE = auto()
+    COPY = auto()
+
+
 @dataclass(kw_only=True)
 class Statement:
     """
@@ -58,6 +69,7 @@ class Statement:
     stmt_type: Optional[StatementType] = None
     lhs_location: int = None
     mutable: Optional[bool] = False
+    mode: Optional[Mode] = Mode.NONE
     value_type: Optional[ValueType] = None
     rhs_location: Optional[int] = None
     rhs_value: Optional[Any] = None
@@ -83,7 +95,7 @@ class Statement:
         Check if statement borrows
         :return: True if statement borrows
         """
-        return self.value_type == ValueType.BORROW
+        return self.value_type == ValueType.BORROW or (self.value_type == ValueType.UNWRAP and self.rhs_location)
 
     def gen_defs(self):
         """
@@ -117,17 +129,6 @@ class Statement:
             f"\t\tkill={self.uses}\n"
             f"\t)"
         )
-
-
-class Mode(Enum):
-    """
-    Mode of ownership transfer (move or copy)
-    """
-
-    NONE = auto()
-    MOVE = auto()
-    NOT_MOVE = auto()
-    COPY = auto()
 
 
 @dataclass(kw_only=True)
@@ -329,8 +330,8 @@ class CFG:
     def add_edge(self, pred: int, succ: List[int]):
         # if only one succ, add it
         if isinstance(succ, int):
-            if pred > succ:
-                pred, succ = succ, pred
+            # if pred > succ:
+            #    pred, succ = succ, pred
             self.edges.append((pred, succ))
         else:
             # for each succ, add them to set of bb succs
@@ -346,12 +347,6 @@ class CFG:
                     bb.succ.add(succ)
                 if bb.name == succ:
                     bb.pred.add(pred)
-
-        for bb in self.bbs:
-            for succ_index in bb.succ:
-                pred = self.index_of(bb)
-                pass
-                # self.bbs[succ_index].pred.add(pred)
 
     # noinspection PyUnresolvedReferences
     def finalise_cfg(self):
@@ -437,7 +432,7 @@ class CFG:
         print(f"CFG edges: {self.edges}")
         # print succs and preds for each bb
         for bb in self.bbs:
-            print(f"BB {bb.name}:\n\tSucc: {bb.succ}\n\tPred: {bb.pred}")
+            print(f"BB {bb.name}:\n\tPred: {bb.pred}\n\tSucc: {bb.succ}")
         print(f"CFG entry: {self.entry}, exit: {self.exit}")
 
     def compute_reaching_definitions(self):
